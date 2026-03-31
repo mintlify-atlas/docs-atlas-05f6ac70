@@ -1,0 +1,91 @@
+---
+title: "Contract overview"
+description: "The Shield smart contract on Base blockchain — on-chain access control for encrypted content sharing."
+---
+
+The Shield smart contract is the trust anchor of the entire platform. It stores and enforces the rules that govern who can access encrypted content, when they can access it, and how many times. Because the contract lives on Base — an Ethereum L2 — its state is public, immutable, and independently verifiable by anyone.
+
+## Purpose
+
+When a sender shares content with a recipient, Shield records the access conditions on-chain as an `AccessPolicy`. No server can override or tamper with those conditions. The contract enforces three constraints for every access attempt:
+
+- **Recipient address** — only the wallet specified at policy creation can log an attempt.
+- **Expiry** — access is denied after the Unix timestamp stored in the policy.
+- **Attempt limit** — once the policy has consumed its maximum number of attempts, it is automatically invalidated.
+
+## Deployment
+
+The contract is deployed on the **Base** mainnet (an Ethereum L2 built by Coinbase). The contract address is configured via the `NEXT_PUBLIC_CONTRACT_ADDRESS` environment variable in the frontend.
+
+<Note>
+  You can inspect the contract's state and transaction history directly on [Basescan](https://basescan.org). Paste the value of `NEXT_PUBLIC_CONTRACT_ADDRESS` into the search bar to view all policies and events.
+</Note>
+
+## The `policies` mapping
+
+Every `AccessPolicy` is stored in a public mapping keyed by a `bytes32` policy ID, which is typically a SHA-256 hash of a unique identifier generated at share time:
+
+```solidity
+mapping(bytes32 => AccessPolicy) public policies;
+```
+
+Because the mapping is `public`, anyone can query any policy's state using a standard `eth_call` — no special permissions required.
+
+## Contract events
+
+The contract emits two events that create a permanent, auditable on-chain log.
+
+### `PolicyCreated`
+
+Emitted when a sender calls `createPolicy`. All three address and ID fields are indexed for efficient log filtering.
+
+```solidity
+event PolicyCreated(
+    bytes32 indexed policyId,
+    address indexed sender,
+    address indexed recipient,
+    uint256 expiry,
+    uint256 maxAttempts
+);
+```
+
+### `VerificationAttempt`
+
+Emitted each time a recipient calls `logAttempt`, recording whether the access attempt succeeded.
+
+```solidity
+event VerificationAttempt(
+    bytes32 indexed policyId,
+    bool success
+);
+```
+
+## Architecture fit
+
+The contract sits at the center of Shield's verification flow:
+
+1. The **sender's browser** encrypts content with AES-GCM 256 and uploads the ciphertext to IPFS.
+2. The sender calls `createPolicy` on-chain, recording the recipient address, expiry, and attempt limit.
+3. The **recipient's browser** signs a SIWE message to prove wallet ownership.
+4. Shield's **backend** calls `isPolicyValid` on-chain to confirm the policy is still active before granting access.
+5. The recipient calls `logAttempt` on-chain, creating an immutable record of the access.
+6. The browser fetches the ciphertext from IPFS and decrypts it locally using the key embedded in the link fragment.
+
+No part of the backend can grant access if the contract says the policy is invalid — and no part of the contract can see the plaintext content.
+
+## Function reference
+
+<CardGroup cols={2}>
+  <Card title="createPolicy" icon="circle-plus" href="/contract/create-policy">
+    Create a new on-chain access policy with recipient, expiry, and attempt limit.
+  </Card>
+  <Card title="logAttempt" icon="clipboard-list" href="/contract/log-attempt">
+    Log an on-chain access attempt and auto-invalidate once the limit is reached.
+  </Card>
+  <Card title="isPolicyValid" icon="circle-check" href="/contract/is-policy-valid">
+    Read-only check — returns true only if the policy is active, unexpired, and has remaining attempts.
+  </Card>
+  <Card title="AccessPolicy struct" icon="table-cells" href="/contract/access-policy">
+    The on-chain data structure that represents a single access policy.
+  </Card>
+</CardGroup>

@@ -1,0 +1,104 @@
+---
+title: "logAttempt"
+description: "Log an on-chain access attempt for a policy. Called by the recipient after their identity has been verified."
+---
+
+`logAttempt` is called by the recipient after the backend has verified their SIWE signature and confirmed the policy is still valid. It increments the on-chain attempt counter and automatically invalidates the policy when the attempt limit is reached. Every call emits a `VerificationAttempt` event, creating an immutable audit trail.
+
+## Function signature
+
+```solidity
+function logAttempt(
+    bytes32 policyId,
+    bool success
+) external
+```
+
+## Parameters
+
+<ParamField path="policyId" type="bytes32" required>
+  The `bytes32` identifier of the policy to update. Must match an existing policy created by `createPolicy`.
+</ParamField>
+
+<ParamField path="success" type="bool" required>
+  Whether the access attempt was successful. In Shield's normal flow this is always `true` — the function is called only after the backend has granted access. The value is passed through to the `VerificationAttempt` event for auditing.
+</ParamField>
+
+## Requirements
+
+The function enforces five conditions before modifying state. Any failing condition reverts the transaction.
+
+| Requirement | Revert message |
+|---|---|
+| Policy must exist | `"Policy does not exist"` |
+| Policy must be valid | `"Policy is not valid"` |
+| Caller must be the recipient | `"Only the recipient can log an attempt"` |
+| Policy must not be expired | `"Policy has expired"` |
+| Attempt limit must not be reached | `"Max attempts reached"` |
+
+<Warning>
+  `logAttempt` can only be called by the wallet address stored in `policy.recipient`. Calling from any other address — including the original sender — will revert with `"Only the recipient can log an attempt"`.
+</Warning>
+
+## Side effects
+
+On a successful call the contract:
+
+1. Increments `policy.attempts` by one.
+2. Checks whether `policy.attempts >= policy.maxAttempts`. If so, sets `policy.valid = false`, permanently invalidating the policy.
+3. Emits `VerificationAttempt`.
+
+```solidity
+policy.attempts++;
+
+if (policy.attempts >= policy.maxAttempts) {
+    policy.valid = false;
+}
+
+emit VerificationAttempt(policyId, success);
+```
+
+<Info>
+  The invalidation happens atomically in the same transaction as the final permitted attempt. There is no window where a concurrent call could squeeze in a (maxAttempts + 1)th attempt.
+</Info>
+
+## Emitted event
+
+```solidity
+event VerificationAttempt(
+    bytes32 indexed policyId,
+    bool success
+);
+```
+
+`policyId` is indexed, making it efficient to retrieve the full attempt history for any policy from a log query.
+
+## TypeScript example
+
+The Shield frontend calls `logAttempt` immediately after the backend returns a successful verification response:
+
+```typescript
+import { useWriteContract, usePublicClient } from 'wagmi';
+import { ShieldABI } from '@/lib/ShieldABI';
+import { Hex } from 'viem';
+
+const { writeContractAsync } = useWriteContract();
+const publicClient = usePublicClient();
+
+// policyId is taken from the URL params as a `0x${string}`
+const policyId = params.policyId as `0x${string}`;
+
+const txHash = await writeContractAsync({
+  address: process.env.NEXT_PUBLIC_CONTRACT_ADDRESS as Hex,
+  abi: ShieldABI,
+  functionName: 'logAttempt',
+  args: [policyId, true],
+});
+
+// Wait for the transaction to be included in a block before decrypting
+await publicClient.waitForTransactionReceipt({ hash: txHash });
+```
+
+<Note>
+  `logAttempt` is a state-changing transaction — the recipient pays gas in ETH on Base. The Shield frontend waits for the transaction receipt before proceeding to decrypt the content, ensuring the on-chain record exists before the decryption key is used.
+</Note>

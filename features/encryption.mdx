@@ -1,0 +1,200 @@
+---
+title: "Encryption"
+description: "How Shield protects your content using AES-GCM 256"
+---
+
+Shield encrypts all content client-side — in your browser — before anything is transmitted to IPFS or any server. The encryption algorithm is **AES-GCM 256**, implemented through the browser's built-in [Web Crypto API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API). No third-party cryptography libraries are used for the core encryption path.
+
+<Note>
+  Shield operates on a **trustless model**. The secret decryption key is never sent to Shield's servers, never stored in the database, and never written to the blockchain. Shield cannot decrypt your content — even with full access to the IPFS CID, the database, and the smart contract state, the backend has no way to recover the original plaintext without the key fragment from the URL.
+</Note>
+
+## Key generation
+
+A unique AES-GCM 256 key is generated for every link, using `crypto.subtle.generateKey`:
+
+```typescript
+async function generateSecretKey(): Promise<CryptoKey> {
+  return await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    true,        // extractable — so it can be exported and placed in the link
+    ['encrypt', 'decrypt']
+  );
+}
+```
+
+The `true` extractable flag allows the key to be exported as a JSON Web Key (JWK) and embedded in the secure link. Once the link is generated and the page is closed, the key exists only in that URL.
+
+Key entropy comes from `crypto.getRandomValues`, which the browser delegates to the operating system's cryptographically secure random number generator (CSPRNG). For the initialization vector (IV), a separate 12-byte random value is generated per encryption operation:
+
+```typescript
+const iv = crypto.getRandomValues(new Uint8Array(12));
+```
+
+## Encryption algorithm
+
+The encryption process uses `crypto.subtle.encrypt` with AES-GCM:
+
+```typescript
+async function encryptContent(
+  content: BufferSource,
+  key: CryptoKey
+): Promise<{ encryptedData: ArrayBuffer; iv: Uint8Array }> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const encryptedData = await crypto.subtle.encrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    content
+  );
+  return { encryptedData, iv };
+}
+```
+
+AES-GCM provides both **confidentiality** (the ciphertext reveals nothing about the plaintext) and **integrity** (any tampering with the ciphertext causes decryption to fail with an error). The 12-byte IV ensures that even if the same key were ever reused — which Shield avoids by generating a new key per link — the ciphertext would differ.
+
+## Upload format
+
+Before uploading to IPFS, the IV and ciphertext are concatenated into a single binary blob:
+
+```typescript
+function combineIvAndEncryptedData(iv: Uint8Array, encryptedData: ArrayBuffer): Blob {
+  const combined = new Uint8Array(iv.length + encryptedData.byteLength);
+  combined.set(iv);
+  combined.set(new Uint8Array(encryptedData), iv.length);
+  return new Blob([combined]);
+}
+```
+
+The layout stored on IPFS is:
+
+```
+[ 12 bytes: IV ][ N bytes: AES-GCM ciphertext + 16-byte auth tag ]
+```
+
+The receiver page reconstructs the IV and ciphertext by slicing at offset 12:
+
+```typescript
+async function decryptContent(encryptedDataWithIv: ArrayBuffer, key: CryptoKey): Promise<ArrayBuffer> {
+  const iv = new Uint8Array(encryptedDataWithIv.slice(0, 12));
+  const encryptedData = encryptedDataWithIv.slice(12);
+  return await crypto.subtle.decrypt(
+    { name: 'AES-GCM', iv },
+    key,
+    encryptedData
+  );
+}
+```
+
+## Key storage: the URL fragment approach
+
+After encryption, the key is exported as a JWK string and placed in the **URL fragment** (`#`) of the secure link:
+
+```typescript
+async function exportKeyToString(key: CryptoKey): Promise<string> {
+  const exported = await crypto.subtle.exportKey('jwk', key);
+  return JSON.stringify(exported);
+}
+
+// Final link construction
+const finalLink = `${baseLink}#${encodeURIComponent(keyString)}`;
+```
+
+A resulting link looks like:
+
+```
+https://shieldhq.xyz/r/0x4a3f...c91b#%7B%22kty%22%3A%22oct%22%2C%22k%22%3A%22...%22%2C%22alg%22%3A%22A256GCM%22%7D
+```
+
+The fragment is a browser-native security boundary:
+
+- Browsers **do not** include the fragment in HTTP requests — it never reaches Shield's servers, Pinata, or any CDN
+- The fragment is **not** stored in server access logs
+- The fragment is accessible only to JavaScript running in the tab where the link was opened
+
+On the receiver page, the key is recovered with:
+
+```typescript
+const keyString = decodeURIComponent(window.location.hash.substring(1));
+const secretKey = await importKeyFromString(keyString);
+```
+
+<Warning>
+  The URL fragment is the only copy of the decryption key. If the link is lost, the content cannot be recovered. Shield does not have a key escrow mechanism.
+</Warning>
+
+## What is encrypted vs. what is not
+
+| Data | Encrypted? | Storage location |
+|------|-----------|-----------------|
+| File content / message text | **Yes** — AES-GCM 256 | IPFS (Pinata) |
+| IV (initialization vector) | N/A — prepended to ciphertext | IPFS (Pinata) |
+| Decryption key | N/A — lives only in the URL fragment | Nowhere (link only) |
+| IPFS CID | No | PostgreSQL database |
+| Recipient wallet address | No | Base blockchain + PostgreSQL |
+| Expiry timestamp | No | Base blockchain + PostgreSQL |
+| Max attempts | No | Base blockchain + PostgreSQL |
+| MIME type | No | PostgreSQL database |
+
+Policy metadata (recipient, expiry, max attempts) is not encrypted because it is needed by the smart contract and the backend to enforce and display access conditions. However, this metadata does not reveal anything about the content itself — it is structurally identical for a 1-byte text message and a 1 GB video.
+
+## The full encryption pipeline
+
+```
+Browser (Sender)
+│
+├─ 1. Generate AES-GCM 256 key          crypto.subtle.generateKey()
+│      └─ IV: crypto.getRandomValues(12 bytes)
+│
+├─ 2. Encrypt content                    crypto.subtle.encrypt()
+│      └─ Output: [IV || ciphertext]
+│
+├─ 3. Upload ciphertext to IPFS          POST https://api.pinata.cloud/pinning/pinFileToIPFS
+│      └─ Returns: contentCid
+│
+├─ 4. Create on-chain access policy      writeContractAsync({ functionName: 'createPolicy' })
+│      └─ Stores: recipient, expiry, maxAttempts
+│
+├─ 5. Store off-chain metadata           POST /api/storeMetadata
+│      └─ Stores: policyId ↔ contentCid mapping (NO key)
+│
+└─ 6. Construct secure link
+       └─ https://.../ r/<policyId>#<urlEncodedKey>
+```
+
+```
+Browser (Recipient)
+│
+├─ 1. Open link → receiver page loads policy metadata
+│
+├─ 2. SIWE authentication + on-chain verification
+│
+├─ 3. logAttempt() transaction confirmed
+│
+├─ 4. Read key from window.location.hash
+│      └─ decodeURIComponent(hash.substring(1))
+│
+├─ 5. Fetch ciphertext from IPFS
+│      └─ GET https://ipfs.io/ipfs/<contentCid>
+│
+└─ 6. Decrypt in browser                 crypto.subtle.decrypt()
+       └─ Render plaintext / file
+```
+
+## Algorithm properties
+
+| Property | Value |
+|----------|-------|
+| Algorithm | AES-GCM |
+| Key size | 256 bits |
+| IV size | 96 bits (12 bytes) |
+| Auth tag size | 128 bits (16 bytes, GCM default) |
+| Key derivation | None — raw random key per link |
+| Implementation | Web Crypto API (`crypto.subtle`) |
+| Key entropy source | `crypto.getRandomValues` (OS CSPRNG) |
+
+## Related pages
+
+- [Security: Trust Model](/security/trust-model) — full explanation of Shield's trustless architecture
+- [Security: Key Management](/security/key-management) — key lifecycle, storage boundaries, and threat model
+- [Sending Content](/features/sending-content) — how encryption fits into the full sending flow
+- [Receiving Content](/features/receiving-content) — how decryption happens on the receiver side

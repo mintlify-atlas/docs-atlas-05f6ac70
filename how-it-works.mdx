@@ -1,0 +1,183 @@
+---
+title: "How It Works"
+description: "The end-to-end encrypted architecture behind Shield — from client-side encryption to on-chain access control and decentralized storage."
+---
+
+Shield's security is built on a single principle: your content is encrypted and decrypted entirely in the browser, and the decryption key never touches any server. Everything else — IPFS storage, on-chain policies, access logging — is designed to preserve that guarantee.
+
+## The 7-step flow
+
+<Steps>
+  <Step title="Client-side encryption">
+    When you upload a file or write a message, Shield generates a unique AES-GCM 256 secret key using the browser's `crypto.subtle.generateKey` API. Your content is then encrypted in-browser with this key before anything leaves your device.
+
+    The encrypted output is a binary blob that combines a 12-byte initialization vector (IV) with the AES-GCM ciphertext. This blob is what gets uploaded to IPFS — not your original content.
+
+    ```
+    [12 bytes IV][AES-GCM ciphertext...]
+    ```
+
+    The plaintext and the secret key never leave your browser.
+  </Step>
+
+  <Step title="IPFS upload">
+    Shield uploads the encrypted blob to IPFS via Pinata. IPFS assigns it a content identifier (CID) — a hash of the encrypted bytes. Because the content is already encrypted, anyone who fetches it from IPFS gets ciphertext that is useless without the key.
+
+    <Note>
+      The CID is derived from the encrypted content, not the plaintext. There is no way to infer anything about the original content from the CID alone.
+    </Note>
+  </Step>
+
+  <Step title="On-chain policy creation">
+    You define access conditions — recipient wallet address, expiry timestamp, and maximum number of access attempts — and sign a `createPolicy` transaction on the Base blockchain.
+
+    The smart contract stores an `AccessPolicy` struct:
+
+    ```solidity
+    struct AccessPolicy {
+        address sender;      // Creator of the policy
+        address recipient;   // Authorized recipient
+        uint64 expiry;       // Expiration Unix timestamp
+        uint32 maxAttempts;  // Maximum access attempts allowed
+        uint32 attempts;     // Attempts used so far
+        bool valid;          // Whether the policy is still valid
+    }
+    ```
+
+    A unique `policyId` (32-byte random hex value) is generated client-side and checked against the contract to ensure it does not already exist. This ID links everything together.
+  </Step>
+
+  <Step title="Secure link generation">
+    After the `createPolicy` transaction confirms, Shield stores a mapping of `policyId → IPFS CID` in a PostgreSQL database. This metadata is non-sensitive — the CID points only to encrypted content.
+
+    Shield then assembles the final link:
+
+    ```
+    https://shieldhq.xyz/r/{policyId}#{encodedSecretKey}
+    ```
+
+    The secret key is placed in the **URL fragment** (after `#`). URL fragments are handled entirely by the browser and are never included in HTTP requests. The key is shown to you once and is never stored anywhere else.
+  </Step>
+
+  <Step title="Recipient verification">
+    When the recipient opens the link, they must prove ownership of the specified wallet address. They sign a SIWE (Sign-In with Ethereum) message:
+
+    ```
+    Sign in to Shield to verify your identity and access the content.
+    ```
+
+    Shield's backend (`/api/verify-siwe`) verifies the signature and then calls `isPolicyValid()` on the Shield contract to confirm:
+
+    - The policy exists and has not been revoked
+    - The signer's address matches the recipient address on the policy
+    - The policy has not expired
+    - The maximum attempt count has not been reached
+
+    If any check fails, access is denied and the attempt is logged.
+  </Step>
+
+  <Step title="On-chain access logging">
+    After successful verification, the recipient signs a `logAttempt` transaction on Base. This call increments the attempt counter on the policy and creates an immutable on-chain record of the access event.
+
+    ```solidity
+    function logAttempt(bytes32 policyId, bool success) external
+    ```
+
+    Shield's backend also writes the attempt to an `access_logs` table in PostgreSQL, recording the recipient address, timestamp, IP address, and success status. This off-chain log does not affect access control — the on-chain contract is the authoritative source.
+  </Step>
+
+  <Step title="Client-side decryption">
+    Once the `logAttempt` transaction confirms, the browser reads the secret key from the URL fragment and fetches the encrypted blob from IPFS. Decryption runs entirely in the browser:
+
+    1. Extract the 12-byte IV from the start of the blob
+    2. Import the secret key using `crypto.subtle.importKey`
+    3. Call `crypto.subtle.decrypt` with AES-GCM, the IV, and the ciphertext
+
+    The result is the original plaintext. For text content, it is rendered directly. For images and PDFs, it is displayed inline. For other file types, a download link is provided.
+
+    At no point does the decrypted content or the secret key touch Shield's servers.
+  </Step>
+</Steps>
+
+## Trust model
+
+Shield's security model is designed so you do not need to trust Shield's infrastructure for the confidentiality of your content.
+
+### What Shield cannot see
+
+| Data | Where it lives | Shield can access? |
+|------|---------------|-------------------|
+| Plaintext content | Never leaves your browser | No |
+| Secret decryption key | URL fragment only | No |
+| Encrypted content | IPFS (public) | Only as ciphertext |
+| Access policy conditions | Base blockchain (public) | Only as on-chain data |
+| CID → policy mapping | PostgreSQL | Yes, but it is non-sensitive |
+
+<Note>
+  The URL fragment (the `#key` part) is a browser-only construct. The HTTP specification explicitly states that clients must not send the fragment to the server. This is what prevents the secret key from ever reaching Shield's infrastructure.
+</Note>
+
+### What Shield can see
+
+- Which wallet address created a policy
+- Which wallet address is the designated recipient
+- The IPFS CID of the encrypted content (not the content itself)
+- The expiry time and max attempt count
+- Access attempt logs (timestamp, IP address, success/failure)
+
+None of this information reveals the content of your files or messages.
+
+### On-chain enforcement
+
+The access conditions you set — recipient address, expiry, and max attempts — are enforced by the Shield smart contract on Base, not by Shield's servers. Even if Shield's backend were compromised, an attacker could not modify the access policy or grant access to unauthorized wallets. The contract is the authoritative enforcer.
+
+<Info>
+  You can independently verify any access policy by calling `isPolicyValid(policyId)` on the Shield contract directly, without going through Shield's frontend or API.
+</Info>
+
+## Hybrid architecture
+
+Shield uses a deliberate combination of decentralized and centralized components.
+
+### Decentralized components
+
+- **Encrypted content** — stored on IPFS; content-addressed and censorship-resistant
+- **Access policies** — stored in the Shield contract on Base; tamper-proof and publicly verifiable
+- **Access logging** — `logAttempt` calls are recorded on-chain; immutable and auditable
+
+### Centralized components
+
+- **CID mapping** — a PostgreSQL database maps `policyId` to the IPFS CID of the encrypted content. This allows the recipient page to look up the right IPFS file without embedding the CID in the URL.
+- **SIWE verification** — the `/api/verify-siwe` route verifies the recipient's wallet signature and confirms the on-chain policy before the recipient signs the `logAttempt` transaction.
+- **Rate limiting** — a sliding-window rate limiter on the API prevents abuse.
+
+<Note>
+  The CID mapping is non-sensitive. Even if the database were publicly readable, an attacker would only learn which encrypted IPFS file corresponds to which policy ID. They would still need the secret key from the URL fragment to decrypt anything.
+</Note>
+
+This hybrid design gives Shield a practical user experience — no wallet signature required just to load the recipient page — without compromising the core end-to-end encryption guarantee.
+
+## Cryptography summary
+
+| Primitive | Algorithm | Implementation |
+|-----------|-----------|---------------|
+| Symmetric encryption | AES-GCM 256 | Web Crypto API (`crypto.subtle`) |
+| IV generation | Random bytes | `crypto.getRandomValues(new Uint8Array(12))` |
+| Key generation | AES-GCM 256-bit | `crypto.subtle.generateKey` |
+| Key serialization | JWK (JSON Web Key) | `crypto.subtle.exportKey('jwk', key)` |
+| Wallet authentication | SIWE (EIP-4361) | `siwe` library |
+
+<CardGroup cols={2}>
+  <Card title="Encryption details" icon="lock" href="/features/encryption">
+    Deep dive into the AES-GCM encryption and key management model
+  </Card>
+  <Card title="Trust model" icon="shield-halved" href="/security/trust-model">
+    Full breakdown of what Shield can and cannot access
+  </Card>
+  <Card title="Smart contract" icon="file-contract" href="/contract/overview">
+    Review the Shield contract on Base
+  </Card>
+  <Card title="Key management" icon="key" href="/security/key-management">
+    How secret keys are generated, used, and discarded
+  </Card>
+</CardGroup>

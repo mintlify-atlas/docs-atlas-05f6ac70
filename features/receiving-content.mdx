@@ -1,0 +1,115 @@
+---
+title: "Receiving Content"
+description: "Access encrypted content sent to your wallet"
+---
+
+When someone shares a Shield link with you, the content is already encrypted and stored on IPFS. To access it, you need to prove that you own the wallet address the sender designated as the recipient. Shield does this without a password or account — instead, it uses your Ethereum wallet's cryptographic signing capability.
+
+<Note>
+  Wallet authentication is required because the access policy written to the Shield smart contract specifies an exact Ethereum address. Only a signature from that address can satisfy the on-chain check. There is no other way to prove you are the intended recipient.
+</Note>
+
+## Receiving flow
+
+<Steps>
+  <Step title="Open the secure link">
+    Click or paste the full link into your browser. The link contains both the policy ID (in the path) and the decryption key (in the URL fragment after `#`). The page loads the policy metadata — recipient address, MIME type, and IPFS CID — from the Shield backend.
+
+    If the policy ID is not found in the database, you will see an error immediately: `Policy not found or backend error.`
+  </Step>
+  <Step title="Connect your wallet">
+    The receiver page prompts you to connect your Ethereum wallet using RainbowKit. Any EVM-compatible wallet works — MetaMask, Coinbase Wallet, WalletConnect-compatible wallets, and more.
+
+    <Note>
+      You must connect the wallet address that matches the recipient address the sender specified. If a different wallet is connected, verification will fail immediately without making any network requests: `This content is not for you. The connected wallet does not match the recipient address.`
+    </Note>
+  </Step>
+  <Step title="Sign the SIWE message">
+    Click **Verify Wallet Ownership**. Your wallet will present a Sign-In with Ethereum (SIWE) message to sign:
+
+    ```
+    Sign in to Shield to verify your identity and access the content.
+    ```
+
+    Signing this message costs no gas — it is an off-chain cryptographic signature that proves you control the private key for your address. The signature and the structured SIWE message are sent to `/api/verify-siwe` for server-side verification.
+  </Step>
+  <Step title="Server-side and on-chain verification">
+    The Shield backend performs three checks in sequence:
+
+    1. **SIWE signature verification** — The `SiweMessage.verify()` call confirms the signature is valid and was produced by the claimed address.
+    2. **Recipient address match** — The verified address is compared against the `recipient_address` stored in the database for this policy.
+    3. **On-chain policy validity** — The backend calls `isPolicyValid(policyId)` on the Shield contract on Base. This checks three conditions simultaneously: `policy.valid && block.timestamp < policy.expiry && policy.attempts < policy.maxAttempts`.
+
+    All three checks must pass. If any fails, access is denied and the attempt is logged.
+  </Step>
+  <Step title="Log the access attempt on-chain">
+    After server-side verification succeeds, your wallet prompts you to sign a **gas-paying transaction** that calls `logAttempt(policyId, true)` on the Shield contract. This is an on-chain write that:
+
+    - Increments the `attempts` counter on the `AccessPolicy` struct
+    - Automatically sets `policy.valid = false` if `attempts >= maxAttempts`
+    - Emits a `VerificationAttempt` event for permanent on-chain auditability
+
+    You must confirm this transaction and wait for it to be included in a block before decryption begins.
+  </Step>
+  <Step title="Client-side decryption">
+    Once the transaction is confirmed, the frontend:
+
+    1. Reads the decryption key from `window.location.hash` — the `#key` fragment of the URL
+    2. Fetches the encrypted binary from IPFS using the stored CID
+    3. Splits the first 12 bytes as the AES-GCM IV, treats the remainder as ciphertext
+    4. Calls `crypto.subtle.decrypt()` in the browser to recover the original content
+
+    Decryption happens entirely in your browser. The key is never sent to any server.
+  </Step>
+  <Step title="View or download the content">
+    The decrypted content is rendered based on its MIME type:
+
+    - **Images** — displayed inline with a download button
+    - **PDFs** — embedded in the page with `<embed>`
+    - **Text / messages** — displayed as plaintext with a copy button
+    - **Other files** — a download link is provided with the appropriate file extension
+  </Step>
+</Steps>
+
+## What SIWE is and why it is required
+
+**Sign-In with Ethereum (SIWE)** is an open standard (EIP-4361) for wallet-based authentication. Instead of a username and password, you sign a structured human-readable message with your wallet's private key. The server can verify the signature using only your public address — no shared secret is ever exchanged.
+
+Shield uses SIWE because:
+
+- The access policy on the blockchain specifies a recipient by their Ethereum address
+- There is no other trustless way to prove address ownership without a private key signature
+- SIWE signatures are free (no gas) and produce a verifiable proof the server can check without querying the blockchain directly
+
+The SIWE message Shield uses includes the domain, your address, and the statement `Sign in to Shield to verify your identity and access the content.` — making it clear what you are signing and preventing the signature from being replayed on other domains.
+
+## Failure states
+
+| Reason | Error message | Status code |
+|--------|--------------|-------------|
+| Wrong wallet connected | `This content is not for you. The connected wallet does not match the recipient address.` | Client-side |
+| SIWE address mismatch | `Signer address does not match recipient address.` | 401 |
+| Policy revoked by creator | `This link has been revoked by the creator.` | 403 |
+| Policy expired or attempts exhausted | `This link is no longer valid. It may have expired or reached its maximum number of access attempts.` | 400 |
+| Policy ID not found | `Policy not found.` | 404 |
+| User rejected wallet signature | `You rejected the signature request. Please try again.` | Client-side |
+| Decryption key missing from URL | `Decryption key not found in URL. Make sure you have the correct link.` | Client-side |
+
+All server-side failures are also recorded in the `access_logs` table with the recipient address, timestamp, IP address, and a `success = false` flag. Successful accesses are also logged.
+
+<Note>
+  Each failed verification attempt (wrong wallet, revoked policy, etc.) is logged but does **not** increment the on-chain `attempts` counter. Only a successful `logAttempt` transaction increments the counter, because the contract enforces `msg.sender == policy.recipient` and all the validity conditions before accepting the call.
+</Note>
+
+## Access attempt logging
+
+Every verification attempt — successful or not — is recorded in the Shield backend's `access_logs` table:
+
+```sql
+INSERT INTO access_logs (policy_id, recipient_address, success, ip_address, accessed_at)
+VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP)
+```
+
+Successful attempts are additionally recorded immutably on-chain via the `VerificationAttempt` event emitted by `logAttempt`. This dual logging gives the sender both a human-readable history in the admin dashboard and a censorship-resistant on-chain audit trail.
+
+See [Access Policies](/features/access-policies) for how to view and manage your sent policies, including revoking access.

@@ -1,0 +1,107 @@
+---
+title: "isPolicyValid"
+description: "Read-only check that returns true only if a policy is active, unexpired, and has remaining access attempts."
+---
+
+`isPolicyValid` is a `view` function that the Shield backend calls before granting a recipient access to encrypted content. It evaluates all three validity conditions in a single on-chain read and returns a boolean result.
+
+## Function signature
+
+```solidity
+function isPolicyValid(bytes32 policyId) external view returns (bool)
+```
+
+## Parameters
+
+<ParamField path="policyId" type="bytes32" required>
+  The `bytes32` identifier of the policy to check. If no policy exists for this ID all struct fields default to zero, so the function returns `false`.
+</ParamField>
+
+## Return value
+
+<ResponseField name="" type="bool">
+  `true` if and only if all three conditions are met simultaneously:
+
+  1. `policy.valid == true` — the policy has not been exhausted or otherwise invalidated.
+  2. `block.timestamp < policy.expiry` — the current block time is before the policy's expiration timestamp.
+  3. `policy.attempts < policy.maxAttempts` — the recipient has not yet consumed all permitted attempts.
+
+  Returns `false` if any condition fails, or if the `policyId` does not exist.
+</ResponseField>
+
+## Implementation
+
+```solidity
+function isPolicyValid(bytes32 policyId) external view returns (bool) {
+    AccessPolicy storage policy = policies[policyId];
+    return policy.valid
+        && block.timestamp < policy.expiry
+        && policy.attempts < policy.maxAttempts;
+}
+```
+
+All three conditions are evaluated with short-circuit `&&`. No state is written. No gas is consumed beyond the cost of the `eth_call`.
+
+## How Shield uses this function
+
+The Shield backend calls `isPolicyValid` inside the `/api/verify-siwe` route handler, after verifying the recipient's SIWE signature and confirming the recipient address matches, but before returning a successful response. If the function returns `false`, the backend rejects the request without logging an attempt on-chain.
+
+```typescript
+// From frontend/src/app/api/verify-siwe/route.ts
+import { createPublicClient, http, Hex } from 'viem';
+import { base } from 'viem/chains';
+import { ShieldABI } from '@/lib/ShieldABI';
+
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http(process.env.BASE_MAINNET_RPC_URL),
+});
+
+const isStillValid = await publicClient.readContract({
+  address: process.env.NEXT_PUBLIC_CONTRACT_ADDRESS as Hex,
+  abi: ShieldABI,
+  functionName: 'isPolicyValid',
+  args: [policyId],
+});
+
+if (!isStillValid) {
+  return NextResponse.json(
+    { error: "This link is no longer valid. It may have expired or reached its maximum number of access attempts." },
+    { status: 400 }
+  );
+}
+```
+
+## Reading from the frontend
+
+You can also call `isPolicyValid` directly from client-side code using viem's `readContract`:
+
+```typescript
+import { createPublicClient, http, Hex } from 'viem';
+import { base } from 'viem/chains';
+import { ShieldABI } from '@/lib/ShieldABI';
+
+const publicClient = createPublicClient({
+  chain: base,
+  transport: http('https://mainnet.base.org'),
+});
+
+const policyId = '0xabc123...' as Hex; // bytes32 policy ID
+
+const isValid = await publicClient.readContract({
+  address: '0xYourContractAddress' as Hex,
+  abi: ShieldABI,
+  functionName: 'isPolicyValid',
+  args: [policyId],
+});
+
+console.log(isValid); // true or false
+```
+
+<Info>
+  Because `isPolicyValid` is a `view` function, it does not require a wallet connection and does not cost gas. It executes as a free `eth_call` against any Base RPC node.
+</Info>
+
+<Tip>
+  To understand exactly why a policy is invalid, read the full `AccessPolicy` struct using the auto-generated `policies(bytes32)` getter and inspect `valid`, `expiry`, and `attempts` individually.
+</Tip>

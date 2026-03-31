@@ -1,0 +1,178 @@
+---
+title: "Smart Contract Deployment"
+description: "Deploy the Shield access control contract to Base Sepolia (testnet) or Base Mainnet."
+---
+
+## Overview
+
+Shield's on-chain access control is handled by `Shield.sol` — a Solidity contract deployed on the Base blockchain. The contract stores `AccessPolicy` records, enforces recipient verification, and maintains an immutable log of access attempts.
+
+You must deploy this contract before the frontend can create or verify access policies.
+
+## The Shield Contract
+
+`contracts/contracts/Shield.sol` is a minimal, ownerless contract with no upgradeability or admin keys. All policies are self-enforcing.
+
+```solidity
+struct AccessPolicy {
+    address sender;       // Creator of the policy
+    address recipient;    // Authorized recipient
+    uint64  expiry;       // Expiration timestamp (Unix seconds)
+    uint32  maxAttempts;  // Maximum number of access attempts
+    uint32  attempts;     // Current attempt count
+    bool    valid;        // Whether the policy is still valid
+}
+
+mapping(bytes32 => AccessPolicy) public policies;
+```
+
+### Key Functions
+
+| Function | Description |
+|---|---|
+| `createPolicy(bytes32 policyId, address recipient, uint256 expiry, uint256 maxAttempts)` | Creates a new access policy. Reverts if a policy with the same ID already exists. |
+| `logAttempt(bytes32 policyId, bool success)` | Records an access attempt. Must be called by the recipient. Automatically invalidates the policy when `maxAttempts` is reached. |
+| `isPolicyValid(bytes32 policyId)` | Returns `true` if the policy exists, has not expired, and has remaining attempts. |
+
+### Events
+
+```solidity
+event PolicyCreated(bytes32 indexed policyId, address indexed sender, address indexed recipient, uint256 expiry, uint256 maxAttempts);
+event VerificationAttempt(bytes32 indexed policyId, bool success);
+```
+
+## Prerequisites
+
+- [Hardhat](https://hardhat.org) dependencies installed (`cd contracts && npm install`)
+- A funded wallet (Base Sepolia ETH for testnet, Base ETH for mainnet)
+- A `.env` file in the `contracts/` directory — see [Environment Variables](/self-hosting/environment-variables#contracts-env-hardhat)
+
+```env
+# contracts/.env
+PRIVATE_KEY=0x...
+BASE_SEPOLIA_RPC_URL=https://base-sepolia.g.alchemy.com/v2/your_alchemy_api_key
+ETHERSCAN_API_KEY=your_basescan_api_key   # optional, for verification
+```
+
+## Deployment
+
+<Steps>
+  <Step title="Navigate to the contracts directory">
+    ```bash
+    cd contracts
+    ```
+  </Step>
+
+  <Step title="Deploy to your target network">
+    <CodeGroup>
+      ```bash Base Sepolia (Testnet)
+      npx hardhat run scripts/deploy.ts --network baseSepolia
+      ```
+
+      ```bash Base Mainnet
+      npx hardhat run scripts/deploy.ts --network baseMainnet
+      ```
+    </CodeGroup>
+
+    A successful deployment prints the contract address:
+
+    ```
+    Shield deployed to: 0x1234567890abcdef1234567890abcdef12345678
+    ```
+
+    Copy this address — you will need it in the next step.
+
+    <Warning>
+      Deploying to Base Mainnet requires real ETH on the Base network. Ensure your wallet has sufficient funds to cover gas before proceeding. Test your deployment on Base Sepolia first.
+    </Warning>
+  </Step>
+
+  <Step title="Update your frontend environment variables">
+    Add the deployed contract address to `frontend/.env`:
+
+    <CodeGroup>
+      ```env Base Sepolia
+      NEXT_PUBLIC_SHIELD_CONTRACT_BASE_SEPOLIA=0x1234567890abcdef...
+      NEXT_PUBLIC_CONTRACT_ADDRESS=0x1234567890abcdef...
+      ```
+
+      ```env Base Mainnet
+      NEXT_PUBLIC_SHIELD_CONTRACT_BASE=0x1234567890abcdef...
+      NEXT_PUBLIC_CONTRACT_ADDRESS=0x1234567890abcdef...
+      ```
+    </CodeGroup>
+
+    `NEXT_PUBLIC_CONTRACT_ADDRESS` is the address the backend `verify-siwe` route uses when calling `isPolicyValid` on-chain. Set it to whichever network your instance is targeting.
+  </Step>
+
+  <Step title="Verify the contract on Basescan (optional)">
+    Contract verification makes the source code publicly visible on Basescan and allows users to interact with the contract directly.
+
+    <CodeGroup>
+      ```bash Base Sepolia
+      npx hardhat verify --network baseSepolia <CONTRACT_ADDRESS>
+      ```
+
+      ```bash Base Mainnet
+      npx hardhat verify --network baseMainnet <CONTRACT_ADDRESS>
+      ```
+    </CodeGroup>
+
+    Hardhat is configured with `@nomicfoundation/hardhat-verify` and Sourcify support. Verification requires `ETHERSCAN_API_KEY` set in `contracts/.env`.
+  </Step>
+</Steps>
+
+## Hardhat Network Configuration
+
+`contracts/hardhat.config.ts` defines two networks out of the box:
+
+```typescript
+networks: {
+  baseSepolia: {
+    url: process.env.BASE_SEPOLIA_RPC_URL || "",
+    accounts: [process.env.PRIVATE_KEY || ""],
+  },
+  baseMainnet: {
+    url: "https://mainnet.base.org",
+    accounts: [process.env.PRIVATE_KEY || ""],
+  },
+},
+```
+
+| Network | Chain ID | Explorer |
+|---|---|---|
+| `baseSepolia` | 84532 | [sepolia.basescan.org](https://sepolia.basescan.org) |
+| `baseMainnet` | 8453 | [basescan.org](https://basescan.org) |
+
+## Deployment Script
+
+The deployment script is intentionally minimal — it deploys `Shield.sol` with no constructor arguments:
+
+```typescript
+import { ethers } from "hardhat";
+
+async function main() {
+  const Shield = await ethers.getContractFactory("Shield");
+  const shield = await Shield.deploy();
+
+  console.log(`Shield deployed to: ${shield.address}`);
+}
+
+main().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+```
+
+The contract has no constructor arguments and no owner. Once deployed, it is fully autonomous.
+
+## Security Notes
+
+- The contract has **no admin keys and no upgradeability**. Deploying a new version requires redeploying a fresh contract.
+- Policies are **write-once**: a policy ID cannot be overwritten once created (`require(policies[policyId].sender == address(0), "Policy already exists")`).
+- `logAttempt` can only be called by the **recipient** of a given policy, preventing third parties from consuming access attempts.
+- When a policy reaches `maxAttempts`, the contract automatically sets `valid = false`, permanently blocking further access.
+
+<Note>
+  If you need to update the contract (e.g. for a bug fix), redeploy to a new address and update `NEXT_PUBLIC_CONTRACT_ADDRESS` and the appropriate `NEXT_PUBLIC_SHIELD_CONTRACT_BASE*` variable in your frontend `.env`.
+</Note>

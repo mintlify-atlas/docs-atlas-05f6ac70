@@ -1,0 +1,63 @@
+---
+title: "Welcome to Shield"
+description: "Decentralized, end-to-end encrypted file and message sharing for the web3 era."
+---
+
+Shield lets you share confidential files and messages with anyone who owns a Web3 wallet — with a security model that ensures your content can only ever be decrypted by your intended recipient.
+
+No passwords. No central servers. No trust required.
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Share your first encrypted file or message in minutes
+  </Card>
+  <Card title="How It Works" icon="diagram-project" href="/how-it-works">
+    Understand the end-to-end encrypted architecture
+  </Card>
+  <Card title="Core Features" icon="shield-halved" href="/features/sending-content">
+    Explore access policies, encryption, and secure links
+  </Card>
+  <Card title="Smart Contract" icon="file-contract" href="/contract/overview">
+    Review the on-chain access control contract on Base
+  </Card>
+</CardGroup>
+
+## What makes Shield different
+
+Shield combines client-side encryption with on-chain access control to deliver a security model you can verify independently — no need to trust Shield's servers.
+
+<CardGroup cols={2}>
+  <Card title="End-to-End Encrypted" icon="lock">
+    Content is encrypted in your browser using AES-GCM 256 before it ever leaves your device. Shield never sees your plaintext.
+  </Card>
+  <Card title="Wallet-Native Auth" icon="wallet">
+    Authenticate with your Ethereum wallet via Sign-In with Ethereum (SIWE). No email or password required.
+  </Card>
+  <Card title="On-Chain Access Control" icon="link-chain">
+    Access policies — including recipient address, expiry, and attempt limits — are enforced by an immutable smart contract on Base.
+  </Card>
+  <Card title="Decentralized Storage" icon="database">
+    Encrypted content is stored on IPFS via Pinata, providing censorship-resistant, content-addressed storage.
+  </Card>
+</CardGroup>
+
+## Get started
+
+<Steps>
+  <Step title="Connect your wallet">
+    Open [shieldhq.xyz](https://shieldhq.xyz) and connect your Ethereum wallet using RainbowKit or any WalletConnect-compatible wallet.
+  </Step>
+  <Step title="Upload or write your content">
+    Paste a message or upload a file. Shield encrypts it in your browser using AES-GCM 256 — your content never leaves your device unencrypted.
+  </Step>
+  <Step title="Set access conditions">
+    Enter your recipient's wallet address, choose an expiry time, and optionally limit the number of access attempts.
+  </Step>
+  <Step title="Share the secure link">
+    Shield creates an on-chain access policy and generates a unique link. Share it with your recipient — only they can decrypt the content.
+  </Step>
+</Steps>
+
+<Note>
+  The secret decryption key is stored only in the URL fragment (`#key`) and is never sent to Shield's servers. Keep your link private.
+</Note>

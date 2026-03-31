@@ -1,0 +1,108 @@
+---
+title: "createPolicy"
+description: "Create a new on-chain access policy that governs who can access shared content, when, and how many times."
+---
+
+`createPolicy` is the entry point for senders. Calling it writes a new `AccessPolicy` to the contract's `policies` mapping and emits a `PolicyCreated` event. Once created, a policy's conditions cannot be changed.
+
+## Function signature
+
+```solidity
+function createPolicy(
+    bytes32 policyId,
+    address recipient,
+    uint256 expiry,
+    uint256 maxAttempts
+) external
+```
+
+## Parameters
+
+<ParamField path="policyId" type="bytes32" required>
+  A unique identifier for this policy. In Shield's frontend, this is a SHA-256 hash derived from a randomly generated string, represented as a `0x`-prefixed hex value. The contract rejects any attempt to create a second policy with the same ID.
+</ParamField>
+
+<ParamField path="recipient" type="address" required>
+  The wallet address of the account that is authorized to access the content. Only this address may later call `logAttempt`. The backend also validates this address against the SIWE signature before granting access.
+</ParamField>
+
+<ParamField path="expiry" type="uint256" required>
+  A Unix timestamp (seconds since epoch) after which access is denied. The value is down-cast to `uint64` on storage — ensure the timestamp fits within that range (valid until the year 584,542,046).
+</ParamField>
+
+<ParamField path="maxAttempts" type="uint256" required>
+  The maximum number of times the recipient may call `logAttempt`. The value is down-cast to `uint32` on storage, so the effective maximum is `4,294,967,295`. Once `attempts` reaches this number the contract automatically sets `valid = false`.
+</ParamField>
+
+## Behavior
+
+The function performs one check before writing state:
+
+- **Policy must not already exist** — `policies[policyId].sender` must equal `address(0)`. If a policy with this ID already exists the call reverts.
+
+On success, the contract initializes the policy as follows:
+
+```solidity
+policies[policyId] = AccessPolicy({
+    sender:      msg.sender,
+    recipient:   recipient,
+    expiry:      uint64(expiry),
+    maxAttempts: uint32(maxAttempts),
+    attempts:    0,
+    valid:       true
+});
+```
+
+`sender` is always set to `msg.sender` — the caller cannot set an arbitrary sender address.
+
+## Emitted event
+
+```solidity
+event PolicyCreated(
+    bytes32 indexed policyId,
+    address indexed sender,
+    address indexed recipient,
+    uint256 expiry,
+    uint256 maxAttempts
+);
+```
+
+All three of `policyId`, `sender`, and `recipient` are indexed, so you can efficiently filter for all policies created by a wallet or sent to a wallet using standard log queries.
+
+## Error conditions
+
+| Revert message | Cause |
+|---|---|
+| `"Policy already exists"` | A policy with this `policyId` is already stored in the contract. |
+
+## TypeScript example
+
+The Shield frontend uses wagmi's `writeContractAsync` to call `createPolicy` after the encrypted content has been uploaded to IPFS:
+
+```typescript
+import { useWriteContract } from 'wagmi';
+import { ShieldABI } from '@/lib/ShieldABI';
+import { Hex } from 'viem';
+
+const { writeContractAsync } = useWriteContract();
+
+const policyIdHex = `0x${sha256Hash}` as Hex; // bytes32 policy ID
+const recipientAddress = '0xRecipientWalletAddress' as Hex;
+const expiryTimestamp = BigInt(Math.floor(Date.now() / 1000) + 60 * 60 * 24 * 7); // 7 days
+const maxAccessAttempts = BigInt(3);
+
+const txHash = await writeContractAsync({
+  address: process.env.NEXT_PUBLIC_CONTRACT_ADDRESS as Hex,
+  abi: ShieldABI,
+  functionName: 'createPolicy',
+  args: [policyIdHex, recipientAddress, expiryTimestamp, maxAccessAttempts],
+});
+```
+
+<Note>
+  `createPolicy` is a state-changing transaction — the sender pays gas in ETH on Base. Make sure the connected wallet has sufficient Base ETH before calling this function.
+</Note>
+
+<Warning>
+  Policy conditions are immutable once created. If you need to change the recipient, expiry, or attempt limit, you must create a new policy with a new `policyId`. There is no `updatePolicy` function.
+</Warning>

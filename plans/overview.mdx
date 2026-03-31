@@ -1,0 +1,89 @@
+---
+title: 'Plans & Limits'
+description: 'Free and Pro plan comparison for Shield — understand your tier limits and what changes when you upgrade.'
+---
+
+Shield offers two tiers: **Free** and **Pro**. Both tiers use the same end-to-end encrypted architecture. The difference is in how much you can share per day and the size of content you can send.
+
+## Plan comparison
+
+<CardGroup cols={2}>
+  <Card title="Free" icon="shield">
+    For individuals sharing occasionally.
+
+    - **5 links/day** daily link creation limit
+    - **30 MB** maximum file size
+    - **500 characters** maximum text length
+    - Single-file shares only
+    - 3 link-creation requests per minute
+    - 10 general API requests per minute
+  </Card>
+  <Card title="Pro" icon="shield-check" href="/plans/upgrading">
+    For power users and teams sharing frequently.
+
+    - **50 links/day** daily link creation limit
+    - **1 GB** maximum file size
+    - **Unlimited** text length
+    - Multi-file share support
+    - 10 link-creation requests per minute
+    - 60 general API requests per minute
+  </Card>
+</CardGroup>
+
+## Limits reference
+
+| Limit | Free | Pro |
+|---|---|---|
+| Links per day | 5 | 50 |
+| Max file size | 30 MB | 1 GB |
+| Max text length | 500 characters | Unlimited |
+| Multi-file shares | No | Yes |
+| Link-creation rate | 3 / minute | 10 / minute |
+| General API rate | 10 / minute | 60 / minute |
+
+Rate limits are enforced per wallet address using a sliding-window algorithm. When you exceed a limit, the API responds with `429 Too Many Requests` and includes a `Retry-After` header indicating how many seconds to wait. See [Rate Limiting](/security/rate-limiting) for details.
+
+Daily link counts reset at midnight UTC. If you reach your daily limit, no new links can be created until the following day.
+
+## Frequently asked questions
+
+<AccordionGroup>
+  <Accordion title="What counts as a 'link'?">
+    Each time you successfully share a file or message through Shield, one link is created and counted against your daily limit. Revoked or failed shares do not count toward the limit.
+  </Accordion>
+
+  <Accordion title="What happens if I exceed the file size limit?">
+    The API returns a `413` error and the upload is rejected before any content is stored on IPFS. No link is created and no daily count is incremented.
+  </Accordion>
+
+  <Accordion title="Does the text character limit apply to files?">
+    No. The 500-character limit (Free) applies only to text-mode shares — plain messages sent without a file attachment. File shares are governed by the file size limit instead.
+  </Accordion>
+
+  <Accordion title="What is multi-file support?">
+    Pro users can bundle multiple files into a single encrypted share. Free users are limited to one file per link.
+  </Accordion>
+
+  <Accordion title="Are limits enforced on-chain or off-chain?">
+    Daily link counts and file/text size limits are enforced by the Shield backend before anything is written to IPFS or the blockchain. Rate limits are also enforced server-side per wallet address. On-chain access policies enforce *recipient-side* rules (expiry, max attempts), which are independent of tier.
+  </Accordion>
+
+  <Accordion title="Do limits apply to recipients?">
+    No. Tier limits only apply to the sender (the wallet creating links). Recipients can access any valid shared link regardless of their own tier.
+  </Accordion>
+
+  <Accordion title="How do I check how many links I've created today?">
+    Your current daily link count is visible on your profile page. It resets at midnight UTC.
+  </Accordion>
+</AccordionGroup>
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Upgrade to Pro" icon="arrow-up-circle" href="/plans/upgrading">
+    Pay with USDC on Base and unlock higher limits instantly.
+  </Card>
+  <Card title="Rate limiting details" icon="clock" href="/security/rate-limiting">
+    Understand the sliding-window algorithm and how to handle 429 responses.
+  </Card>
+</CardGroup>

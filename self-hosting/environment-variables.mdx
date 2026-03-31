@@ -1,0 +1,286 @@
+---
+title: "Environment Variables"
+description: "Required and optional environment variables for self-hosting Shield."
+---
+
+All variables below belong in a `.env` file placed inside the `frontend/` directory. Variables prefixed with `NEXT_PUBLIC_` are exposed to the browser bundle; all others are server-only.
+
+## Complete `.env` Example
+
+```env
+# ── Database ──────────────────────────────────────────────
+POSTGRES_URL=postgresql://user:password@host:port/database
+
+# ── IPFS / Storage ────────────────────────────────────────
+PINATA_JWT=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+PINATA_GATEWAY_URL=https://your-gateway.mypinata.cloud
+NEXT_PUBLIC_PINATA_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...  # restricted key for browser uploads
+
+# ── Blockchain ────────────────────────────────────────────
+ALCHEMY_API_KEY=your_alchemy_api_key
+BASE_MAINNET_RPC_URL=https://base-mainnet.g.alchemy.com/v2/your_alchemy_api_key
+BASE_RPC_URL=https://mainnet.base.org
+
+# Contract addresses
+NEXT_PUBLIC_SHIELD_CONTRACT_BASE=0x...
+NEXT_PUBLIC_SHIELD_CONTRACT_BASE_SEPOLIA=0x...
+NEXT_PUBLIC_CONTRACT_ADDRESS=0x...
+
+# Upgrade / payments
+USDC_CONTRACT_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+UPGRADE_WALLET_ADDRESS=0x...
+
+# ── Authentication ────────────────────────────────────────
+JWT_SECRET=a-long-random-secret-string
+SESSION_SECRET=another-long-random-secret
+
+# ── Application ───────────────────────────────────────────
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
+FRONTEND_URL=http://localhost:3000
+
+# ── Admin (optional) ─────────────────────────────────────
+ADMIN_ADDRESSES=0xabc...,0xdef...
+SUPER_ADMIN_ADDRESSES=0xabc...
+TEAM_ADMIN_ADDRESSES=0xdef...
+CRON_SECRET=a-secret-for-cron-endpoints
+TALENT_PROTOCOL_API_KEY=your_talent_protocol_key
+```
+
+---
+
+## Database
+
+<ParamField path="POSTGRES_URL" type="string" required>
+  PostgreSQL connection string used by the [Neon serverless driver](https://neon.tech/docs/serverless/serverless-driver).
+
+  ```env
+  POSTGRES_URL=postgresql://user:password@host:5432/shield
+  ```
+
+  The app throws a startup error if this variable is missing. Tables are created automatically on first run via `db-init.ts`.
+</ParamField>
+
+---
+
+## IPFS / Storage
+
+<ParamField path="PINATA_JWT" type="string" required>
+  JWT token issued by Pinata used to authenticate uploads to IPFS. Obtain yours from the [Pinata dashboard](https://app.pinata.cloud/developers/api-keys).
+
+  ```env
+  PINATA_JWT=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+  ```
+</ParamField>
+
+<ParamField path="PINATA_GATEWAY_URL" type="string" required>
+  Base URL of your dedicated Pinata IPFS gateway. Used to construct download URLs for encrypted content.
+
+  ```env
+  PINATA_GATEWAY_URL=https://your-gateway.mypinata.cloud
+  ```
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_PINATA_API_KEY" type="string" required>
+  A **restricted** Pinata API key used by the browser to upload encrypted content directly to IPFS. This key is exposed to the browser bundle (note the `NEXT_PUBLIC_` prefix), so it must be scoped to pinning only — never use an admin Pinata key here.
+
+  ```env
+  NEXT_PUBLIC_PINATA_API_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+  ```
+
+  Create a restricted key in the [Pinata dashboard](https://app.pinata.cloud/developers/api-keys) with only the `pinFileToIPFS` permission enabled.
+</ParamField>
+
+---
+
+## Blockchain
+
+<ParamField path="ALCHEMY_API_KEY" type="string" required>
+  Alchemy API key used for wallet-related RPC calls.
+
+  ```env
+  ALCHEMY_API_KEY=your_alchemy_api_key
+  ```
+</ParamField>
+
+<ParamField path="BASE_MAINNET_RPC_URL" type="string" required>
+  Full RPC endpoint for Base Mainnet. Used by the `verify-siwe` API route to call `isPolicyValid` on the Shield contract.
+
+  ```env
+  BASE_MAINNET_RPC_URL=https://base-mainnet.g.alchemy.com/v2/your_alchemy_api_key
+  ```
+</ParamField>
+
+<ParamField path="BASE_RPC_URL" type="string">
+  Fallback RPC URL used by the upgrade payment verification route. Defaults to `https://mainnet.base.org` if not set.
+
+  ```env
+  BASE_RPC_URL=https://mainnet.base.org
+  ```
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_CONTRACT_ADDRESS" type="string" required>
+  The Shield contract address for the currently active network. This is read server-side in `verify-siwe` to validate policies on-chain.
+
+  ```env
+  NEXT_PUBLIC_CONTRACT_ADDRESS=0x...
+  ```
+
+  <Note>
+    Set this to whichever network your instance targets. It should match either `NEXT_PUBLIC_SHIELD_CONTRACT_BASE` (mainnet) or `NEXT_PUBLIC_SHIELD_CONTRACT_BASE_SEPOLIA` (testnet).
+  </Note>
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_SHIELD_CONTRACT_BASE" type="string">
+  Contract address of the Shield deployment on **Base Mainnet**. Exposed to the browser so the frontend can switch contracts based on the connected network.
+
+  ```env
+  NEXT_PUBLIC_SHIELD_CONTRACT_BASE=0x...
+  ```
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_SHIELD_CONTRACT_BASE_SEPOLIA" type="string">
+  Contract address of the Shield deployment on **Base Sepolia** (testnet). Used during development and testing.
+
+  ```env
+  NEXT_PUBLIC_SHIELD_CONTRACT_BASE_SEPOLIA=0x...
+  ```
+</ParamField>
+
+<ParamField path="USDC_CONTRACT_ADDRESS" type="string">
+  Address of the USDC token contract on Base, used when verifying Pro plan upgrade payments.
+
+  ```env
+  # Base Mainnet USDC
+  USDC_CONTRACT_ADDRESS=0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913
+  ```
+</ParamField>
+
+<ParamField path="UPGRADE_WALLET_ADDRESS" type="string">
+  The wallet address that receives USDC payments when users upgrade to the Pro plan.
+
+  ```env
+  UPGRADE_WALLET_ADDRESS=0x...
+  ```
+</ParamField>
+
+---
+
+## Authentication
+
+<ParamField path="JWT_SECRET" type="string" required>
+  Secret used to sign and verify JSON Web Tokens issued after SIWE authentication. Must be a long, random string.
+
+  ```env
+  JWT_SECRET=a-very-long-random-secret-at-least-32-characters
+  ```
+
+  Generate a suitable value with:
+
+  ```bash
+  openssl rand -hex 32
+  ```
+</ParamField>
+
+<ParamField path="SESSION_SECRET" type="string" required>
+  Additional secret used for session management. Should be a different value from `JWT_SECRET`.
+
+  ```env
+  SESSION_SECRET=another-random-secret-string
+  ```
+</ParamField>
+
+---
+
+## Application
+
+<ParamField path="NEXT_PUBLIC_APP_URL" type="string" required>
+  The public-facing URL of your Shield instance. Used to construct shareable links shown to senders.
+
+  ```env
+  NEXT_PUBLIC_APP_URL=https://shield.yourdomain.com
+  ```
+</ParamField>
+
+<ParamField path="NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID" type="string" required>
+  WalletConnect Cloud project ID for wallet connection support via RainbowKit. Obtain yours at [cloud.walletconnect.com](https://cloud.walletconnect.com).
+
+  ```env
+  NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
+  ```
+</ParamField>
+
+<ParamField path="FRONTEND_URL" type="string">
+  Explicit override for the base URL used when constructing shareable links in server-side API routes. Falls back to the `VERCEL_URL` environment variable (set automatically on Vercel) and then `http://localhost:3000`.
+
+  ```env
+  FRONTEND_URL=https://shield.yourdomain.com
+  ```
+</ParamField>
+
+---
+
+## Admin (Optional)
+
+These variables are only required if you intend to use the built-in admin dashboard.
+
+<ParamField path="ADMIN_ADDRESSES" type="string">
+  Comma-separated list of wallet addresses that have admin access.
+
+  ```env
+  ADMIN_ADDRESSES=0xabc...,0xdef...
+  ```
+</ParamField>
+
+<ParamField path="SUPER_ADMIN_ADDRESSES" type="string">
+  Comma-separated list of wallet addresses with super-admin privileges (can manage other admins).
+
+  ```env
+  SUPER_ADMIN_ADDRESSES=0xabc...
+  ```
+</ParamField>
+
+<ParamField path="TEAM_ADMIN_ADDRESSES" type="string">
+  Comma-separated list of wallet addresses with team-admin privileges.
+
+  ```env
+  TEAM_ADMIN_ADDRESSES=0xdef...
+  ```
+</ParamField>
+
+<ParamField path="CRON_SECRET" type="string">
+  Secret token required to call the `/api/cleanup` cron endpoint. Set this when running scheduled cleanup jobs.
+
+  ```env
+  CRON_SECRET=a-secret-for-cron-endpoints
+  ```
+</ParamField>
+
+<ParamField path="TALENT_PROTOCOL_API_KEY" type="string">
+  API key for [Talent Protocol](https://talentprotocol.com) integration, used to enrich user stats on profile pages.
+
+  ```env
+  TALENT_PROTOCOL_API_KEY=your_talent_protocol_key
+  ```
+</ParamField>
+
+---
+
+## Contracts `.env` (Hardhat)
+
+The `contracts/` directory requires its own environment variables for deployment. Create a `.env` file in `contracts/`:
+
+```env
+# Required for testnet deployment
+BASE_SEPOLIA_RPC_URL=https://base-sepolia.g.alchemy.com/v2/your_alchemy_api_key
+
+# Required for both testnet and mainnet deployments
+PRIVATE_KEY=0x...
+
+# Optional: for contract verification on Basescan
+ETHERSCAN_API_KEY=your_basescan_api_key
+```
+
+<Warning>
+  Never commit your `PRIVATE_KEY` to version control. Add `.env` to your `.gitignore` before setting any secrets.
+</Warning>

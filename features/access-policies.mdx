@@ -1,0 +1,144 @@
+---
+title: "Access Policies"
+description: "Configure who can access your content and under what conditions"
+---
+
+Every piece of content shared through Shield is governed by an **access policy** — a set of rules stored on the Base blockchain that define who can open the link, for how long, and how many times. Policies are created by the sender, enforced by the smart contract, and cannot be modified after creation (except for explicit revocation).
+
+## The three access control parameters
+
+<CardGroup cols={2}>
+  <Card title="Recipient Address" icon="wallet">
+    The Ethereum wallet address that is authorized to access this content. The Shield contract stores this address and enforces it in `logAttempt` with `require(msg.sender == policy.recipient, "Only the recipient can log an attempt")`. No other address can successfully complete verification.
+  </Card>
+  <Card title="Expiry Timestamp" icon="clock">
+    A Unix timestamp (seconds since epoch) after which the policy is invalid. Computed at creation as `block.timestamp + duration`. The contract checks `block.timestamp < policy.expiry` in both `logAttempt` and `isPolicyValid`. Once expired, the policy cannot be reopened — not even by the sender.
+  </Card>
+  <Card title="Max Attempts" icon="shield-half">
+    The maximum number of times the recipient can successfully access the content. Stored as a `uint32` on-chain. Each call to `logAttempt` increments the `attempts` counter. When `attempts >= maxAttempts`, `policy.valid` is set to `false` automatically.
+  </Card>
+  <Card title="Policy ID" icon="fingerprint">
+    A random 32-byte (`bytes32`) identifier generated client-side using `crypto.getRandomValues`. Uniqueness is verified against the contract before the policy creation transaction is submitted. The policy ID is the path component of the secure link (`/r/<policyId>`).
+  </Card>
+</CardGroup>
+
+## The AccessPolicy struct
+
+The following is the complete `AccessPolicy` struct from `Shield.sol`:
+
+```solidity
+struct AccessPolicy {
+    address sender;      // Wallet address that created the policy
+    address recipient;   // Wallet address authorized to access content
+    uint64 expiry;       // Unix timestamp after which access is denied
+    uint32 maxAttempts;  // Maximum number of allowed access attempts
+    uint32 attempts;     // Running count of successful access attempts
+    bool valid;          // Manual validity flag; set false when maxAttempts is reached
+}
+
+mapping(bytes32 => AccessPolicy) public policies;
+```
+
+The `policies` mapping is public, meaning anyone can read the state of any policy on-chain by querying the contract with its policy ID. This is by design — the access rules themselves are not secret, only the encrypted content is.
+
+## On-chain enforcement
+
+The Shield contract enforces all access conditions without any trusted intermediary. The `logAttempt` function applies every constraint before accepting the call:
+
+```solidity
+function logAttempt(bytes32 policyId, bool success) external {
+    AccessPolicy storage policy = policies[policyId];
+    require(policy.sender != address(0), "Policy does not exist");
+    require(policy.valid, "Policy is not valid");
+    require(msg.sender == policy.recipient, "Only the recipient can log an attempt");
+    require(block.timestamp < policy.expiry, "Policy has expired");
+    require(policy.attempts < policy.maxAttempts, "Max attempts reached");
+
+    policy.attempts++;
+
+    if (policy.attempts >= policy.maxAttempts) {
+        policy.valid = false;
+    }
+
+    emit VerificationAttempt(policyId, success);
+}
+```
+
+Because these checks run in the EVM, they cannot be bypassed by the Shield backend, Pinata, or any other off-chain component. Even if Shield's servers were compromised, an attacker cannot increment the attempt counter or gain access to content without a valid wallet signature from the designated recipient.
+
+The `isPolicyValid` view function is used by the backend during the SIWE verification step to pre-check validity before asking the recipient to sign a transaction:
+
+```solidity
+function isPolicyValid(bytes32 policyId) external view returns (bool) {
+    AccessPolicy storage policy = policies[policyId];
+    return policy.valid && block.timestamp < policy.expiry && policy.attempts < policy.maxAttempts;
+}
+```
+
+## Off-chain metadata
+
+In addition to the on-chain policy, Shield stores supplementary metadata in a PostgreSQL database (via Neon) to support the receiver page and admin dashboard:
+
+| Field | Description |
+|-------|-------------|
+| `policy_id` | Matches the on-chain `bytes32` policy ID |
+| `creator_id` | Sender's wallet address |
+| `resource_cid` | IPFS content identifier for the encrypted content |
+| `recipient_address` | Recipient wallet (mirrors the on-chain value) |
+| `mime_type` | File MIME type (e.g. `image/png`, `text/plain`) |
+| `is_text` | Boolean flag for text vs. file content |
+| `expiry` | Unix timestamp (mirrors the on-chain value) |
+| `max_attempts` | Max attempts (mirrors the on-chain value) |
+| `attempts` | Attempt counter (eventually consistent with on-chain) |
+| `valid` | Validity flag |
+| `status` | Policy state: `active` or `revoked` |
+| `content_length` | Original content size in bytes |
+
+This metadata does not expose any encrypted content and cannot be used to decrypt data without the secret key in the link fragment. It exists purely to let the receiver page know which IPFS CID to fetch and how to render the result.
+
+## Policy states
+
+A policy can be in one of four effective states:
+
+| State | Condition | Description |
+|-------|-----------|-------------|
+| **Active** | `valid = true`, `block.timestamp < expiry`, `attempts < maxAttempts` | The link is valid and can be accessed. |
+| **Expired** | `block.timestamp >= expiry` | The time window has passed. Access is permanently denied regardless of remaining attempts. |
+| **Attempts exhausted** | `attempts >= maxAttempts` | The recipient has used all allowed accesses. The contract sets `valid = false` automatically on the final attempt. |
+| **Revoked** | `status = 'revoked'` in database | The sender explicitly revoked the link via the admin dashboard. The off-chain check in `/api/verify-siwe` blocks access before the on-chain call is even attempted. |
+
+<Info>
+  Revocation is currently enforced off-chain via the database `status` field. A revoked policy still exists on-chain with `valid = true` (unless it was also expired or exhausted), but the Shield backend blocks access at the SIWE verification step. This is consistent with Shield's hybrid architecture where on-chain enforcement handles the cryptographic guarantees and off-chain metadata handles the UX layer.
+</Info>
+
+## Admin dashboard
+
+The admin dashboard (at `/admin`) lets you view all policies you have created and monitor their status. For each policy you can see:
+
+- Recipient address
+- Creation date and expiry timestamp
+- Attempt count vs. max attempts
+- Current status (active / expired / revoked / exhausted)
+- Full access log — every verification attempt, including failures, with timestamps and IP addresses
+
+### Revoking a policy
+
+To revoke a link before it expires:
+
+1. Open the admin dashboard
+2. Find the policy in your list
+3. Click **Revoke**
+
+Revocation sets `status = 'revoked'` in the database. From that point on, the `/api/verify-siwe` endpoint returns a `403` error with the message `This link has been revoked by the creator.` before any on-chain interaction occurs.
+
+<Warning>
+  Revocation cannot be undone. Once a policy is marked revoked, the recipient will be permanently blocked from accessing the content through Shield, even if the link has not expired and attempts remain.
+</Warning>
+
+## Related pages
+
+- [Contract: Access Policy](/contract/access-policy) — full contract reference for the `AccessPolicy` struct
+- [Contract: Create Policy](/contract/create-policy) — reference for the `createPolicy` function
+- [Contract: Log Attempt](/contract/log-attempt) — reference for the `logAttempt` function
+- [Contract: isPolicyValid](/contract/is-policy-valid) — reference for the `isPolicyValid` function
+- [Encryption](/features/encryption) — how content is encrypted before the policy is created

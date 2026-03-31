@@ -1,0 +1,96 @@
+---
+title: 'Upgrading to Pro'
+description: 'How to upgrade to Shield Pro using USDC on the Base network — pricing, payment flow, and what changes immediately after.'
+---
+
+Shield Pro is purchased directly on-chain using **USDC on Base**. There is no subscription management dashboard or credit card — your wallet is your account, and the payment is a standard ERC-20 transfer.
+
+<Tip>
+  The yearly plan costs $99.99 USDC compared to $9.99 USDC × 12 = $119.88 for twelve monthly payments — a saving of roughly $20 per year. If you plan to use Shield Pro for more than two months, the yearly plan is the better value.
+</Tip>
+
+## Pricing
+
+| Plan | Price | Billing |
+|---|---|---|
+| Monthly | $9.99 USDC | Per month |
+| Yearly | $99.99 USDC | Per year (~$20 savings) |
+
+Prices are fixed in USDC (6 decimal precision on-chain: `9990000` units monthly, `99990000` units yearly). There are no hidden fees and no gas costs beyond the standard Base network transaction fee for the USDC transfer.
+
+## Requirements
+
+Before upgrading, make sure you have:
+
+- A wallet connected to Shield (via RainbowKit / WalletConnect)
+- Enough USDC on **Base mainnet** to cover the plan price
+- A small amount of ETH on Base to pay the gas fee for the USDC transfer
+
+## Upgrade flow
+
+<Steps>
+  <Step title="Connect your wallet">
+    Open the Shield app and connect your Ethereum wallet. You must be authenticated via Sign-In with Ethereum (SIWE) before the upgrade page is accessible.
+  </Step>
+
+  <Step title="Go to the Upgrade page">
+    Navigate to the Upgrade page from your profile or the main navigation. You will see your current tier and the two available plan options.
+  </Step>
+
+  <Step title="Choose a plan">
+    Select **Monthly** ($9.99 USDC) or **Yearly** ($99.99 USDC). Your wallet will prompt you to approve a USDC `transfer` call on the Base network, sending the exact amount to the Shield upgrade wallet.
+  </Step>
+
+  <Step title="Confirm the transaction">
+    Review and confirm the transaction in your wallet. The transfer sends USDC directly to the Shield upgrade wallet address on Base mainnet. Wait for the transaction to be included in a block — this typically takes a few seconds on Base.
+  </Step>
+
+  <Step title="Automatic verification">
+    Once the USDC transfer is confirmed on-chain, Shield's backend verifies the transaction hash against your connected wallet address and the expected amount. Your account is upgraded to Pro immediately — no manual review required.
+  </Step>
+</Steps>
+
+<Note>
+  Pro access is activated the moment the on-chain payment is verified. You do not need to refresh or sign in again. Your new limits (50 links/day, 1 GB file size, unlimited text, multi-file support) take effect on your next link creation.
+</Note>
+
+## What changes after upgrading
+
+Once your account is upgraded, the following limits apply immediately:
+
+| Limit | Free | Pro |
+|---|---|---|
+| Links per day | 5 | 50 |
+| Max file size | 30 MB | 1 GB |
+| Max text length | 500 characters | Unlimited |
+| Multi-file shares | No | Yes |
+| Link-creation rate | 3 / minute | 10 / minute |
+| General API rate | 10 / minute | 60 / minute |
+
+## Subscription expiry
+
+Your Pro subscription is time-bounded:
+
+- **Monthly**: active for 30 days from the payment date
+- **Yearly**: active for 365 days from the payment date
+
+You can view your subscription expiry date on the Upgrade page. When your subscription expires, your account automatically reverts to the Free tier. Existing links you created while on Pro remain valid — expiry only affects your ability to create new links above the Free tier limits.
+
+## Troubleshooting
+
+**Transaction rejected in wallet** — The upgrade was cancelled. No USDC was transferred and your tier has not changed. Try again when you are ready.
+
+**Payment verification failed** — If your USDC transfer succeeded but Shield did not upgrade your account, contact support with your transaction hash. The on-chain record of the transfer is permanent and your upgrade can be applied manually.
+
+**Not enough USDC** — If your wallet does not have sufficient USDC on Base, the transaction will fail before submission. Bridge USDC to Base using the [Base Bridge](https://bridge.base.org) and try again.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Plans & Limits" icon="list" href="/plans/overview">
+    Full comparison of Free vs Pro features and limits.
+  </Card>
+  <Card title="Rate Limiting" icon="clock" href="/security/rate-limiting">
+    How per-wallet rate limits work across both tiers.
+  </Card>
+</CardGroup>

@@ -1,24 +1,11 @@
 {
-  "$schema": "https://mintlify.com/docs.json",
-  "name": "Shield",
+  "projectType": "saas",
+  "projectName": "Shield",
+  "projectDescription": "A decentralized, end-to-end encrypted file and message sharing platform built on the Base blockchain, using IPFS storage and SIWE authentication for trustless, wallet-native secure content delivery.",
   "theme": "luma",
-  "colors": {
-    "primary": "#7c7c7c",
-    "light": "#050505",
-    "dark": "#c8c8c8"
-  },
-  "favicon": "https://media.brand.dev/e93e2f3f-be44-41e6-a603-2ed851dcacaf.png",
-  "navbar": {
-    "primary": {
-      "type": "github",
-      "href": "https://github.com/babs0022/SHIELD"
-    }
-  },
-  "footer": {
-    "socials": {
-      "github": "https://github.com/babs0022/SHIELD"
-    }
-  },
+  "primaryColor": "#7c7c7c",
+  "lightColor": "#050505",
+  "darkColor": "#c8c8c8",
   "navigation": {
     "tabs": [
       {
@@ -87,5 +74,26 @@
         ]
       }
     ]
-  }
+  },
+  "keyFeatures": [
+    "AES-GCM 256 client-side encryption via Web Crypto API",
+    "SIWE (Sign-In with Ethereum) wallet authentication",
+    "On-chain access policies via Solidity smart contract on Base",
+    "Decentralized IPFS storage via Pinata",
+    "Time-limited and attempt-limited access controls",
+    "On-chain access logging for transparency",
+    "Free and Pro tiers with per-wallet rate limiting",
+    "USDC-based Pro subscription payments"
+  ],
+  "publicApiSurface": [
+    "POST /api/storeMetadata — Store encrypted content metadata and create a secure link",
+    "POST /api/verify-siwe — Verify a SIWE signature and validate on-chain policy",
+    "GET /api/getPolicy/[policyId] — Retrieve policy details by ID",
+    "GET /api/getEncryptedContent/[cid] — Fetch encrypted content from IPFS",
+    "GET /api/access-logs — Retrieve access logs for authenticated user",
+    "POST /api/upgrade/verify-payment — Verify USDC payment for Pro upgrade",
+    "Shield.createPolicy(policyId, recipient, expiry, maxAttempts) — Create on-chain access policy",
+    "Shield.logAttempt(policyId, success) — Log an on-chain access attempt",
+    "Shield.isPolicyValid(policyId) — Check if a policy is still valid"
+  ]
 }

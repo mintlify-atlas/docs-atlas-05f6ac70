@@ -1,0 +1,126 @@
+---
+title: 'Rate Limiting'
+description: 'How Shield protects against abuse with per-wallet, sliding-window rate limits — limits by tier, response format, and retry guidance.'
+---
+
+Shield enforces rate limits on all API endpoints to prevent abuse and ensure fair usage across all users. Limits are applied **per wallet address** and vary by tier.
+
+## Limits by tier
+
+<CardGroup cols={2}>
+  <Card title="Free tier" icon="shield">
+    **General API requests**
+    10 requests per minute
+
+    **Link creation** (`/api/storeMetadata`)
+    3 requests per minute
+
+    **Daily link limit**
+    5 links per day
+  </Card>
+  <Card title="Pro tier" icon="shield-check">
+    **General API requests**
+    60 requests per minute
+
+    **Link creation** (`/api/storeMetadata`)
+    10 requests per minute
+
+    **Daily link limit**
+    50 links per day
+  </Card>
+</CardGroup>
+
+### Full limits table
+
+| Limit | Free | Pro |
+|---|---|---|
+| General API rate | 10 req / min | 60 req / min |
+| Link creation rate | 3 req / min | 10 req / min |
+| Daily links | 5 / day | 50 / day |
+
+The link creation endpoint uses a stricter per-minute limit than the general API because each successful link creation triggers database writes, an IPFS upload, and an on-chain transaction — making it the most resource-intensive operation in Shield.
+
+## Sliding window algorithm
+
+Shield uses a **sliding window** implementation stored in PostgreSQL. For each incoming request:
+
+1. All records older than the current window (60 seconds) are deleted from the `rate_limits` table for the requesting wallet.
+2. The remaining record count is compared against the tier's `maxRequests` threshold.
+3. If the count is below the threshold, the request is logged and allowed. The response includes an `X-RateLimit-Remaining` header with the number of requests left in the current window.
+4. If the count is at or above the threshold, the request is rejected and a `429` response is returned.
+
+Unlike a fixed-window algorithm (which resets counters at a fixed clock boundary), the sliding window measures requests over the last 60 seconds from *now*, which provides smoother enforcement and avoids burst-at-boundary attacks.
+
+## 429 response format
+
+When a rate limit is exceeded, Shield returns:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 23
+X-RateLimit-Remaining: 0
+Content-Type: application/json
+```
+
+```json
+{
+  "error": "Rate limit exceeded. Please try again later.",
+  "retryAfter": 23
+}
+```
+
+The `Retry-After` value is in **seconds**. It is calculated as the time until the oldest request in the current window ages out of the 60-second sliding window. Always wait at least this many seconds before retrying.
+
+## Daily link limit
+
+In addition to per-minute rate limits, Shield enforces a daily cap on link creation:
+
+- **Free**: 5 links per day
+- **Pro**: 50 links per day
+
+The daily count is tracked per wallet address and checked before processing any new link creation request. When the daily limit is reached, the API returns a `429` response with the message `"You have reached your daily limit for creating links."` This limit resets at midnight UTC.
+
+<Info>
+  If you are building an integration and need to create many links in a short period, upgrade to Pro (10 req/min, 50 links/day) and implement exponential backoff with the `Retry-After` header to handle occasional 429 responses gracefully.
+</Info>
+
+## Fail-open behavior
+
+If the rate limit database check fails due to an infrastructure error, Shield **fails open** — the request is allowed through rather than being rejected. This prioritizes availability over strict rate enforcement during transient database issues. Under normal conditions, all limits are enforced precisely.
+
+## Handling rate limits in your integration
+
+When consuming the Shield API, always handle `429` responses:
+
+```javascript
+async function createLink(payload, token) {
+  const response = await fetch('/api/storeMetadata', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (response.status === 429) {
+    const { retryAfter } = await response.json();
+    // Wait for the retry-after period before trying again
+    await new Promise(resolve => setTimeout(resolve, retryAfter * 1000));
+    return createLink(payload, token); // retry once
+  }
+
+  return response.json();
+}
+```
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Plans & Limits" icon="list" href="/plans/overview">
+    Full comparison of Free vs Pro tier capabilities.
+  </Card>
+  <Card title="Upgrading to Pro" icon="arrow-up-circle" href="/plans/upgrading">
+    Increase your rate limits by upgrading with USDC on Base.
+  </Card>
+</CardGroup>

@@ -1,0 +1,84 @@
+---
+title: 'Key Management'
+description: 'How encryption keys are generated, used, and protected in Shield — and why a lost link means lost access.'
+---
+
+Shield generates a unique, single-use secret key for every share. That key encrypts the content, is embedded in the share link, and is never stored anywhere else. This page explains the full lifecycle of that key and the implications for users.
+
+<Warning>
+  Shield cannot recover a lost link. Because the secret key exists only in the link itself — never on any server or database — there is no recovery path if the link is lost. Treat the share link like a password: store it securely and share it only with the intended recipient.
+</Warning>
+
+## Key lifecycle
+
+<Steps>
+  <Step title="Key generation">
+    When you create a share, Shield generates a cryptographically random secret key in your browser using `crypto.getRandomValues()` from the Web Crypto API. The key is generated locally and never leaves your device through any network request.
+  </Step>
+
+  <Step title="Content encryption">
+    The plaintext content — a file or message — is encrypted with **AES-GCM 256** using the generated key. AES-GCM provides both confidentiality and integrity: the ciphertext cannot be tampered with without the recipient detecting it. Encryption happens entirely in the browser before the content is uploaded.
+  </Step>
+
+  <Step title="Upload and policy creation">
+    The encrypted ciphertext (not the plaintext) is uploaded to IPFS. The IPFS CID — a cryptographic hash of the encrypted content — is used to create an on-chain access policy. The secret key is not included in either the IPFS upload or the on-chain transaction.
+  </Step>
+
+  <Step title="Link generation">
+    A share link is generated in the form:
+
+    ```
+    https://shieldhq.xyz/r/<policy-id>#<secret-key>
+    ```
+
+    The `<secret-key>` is placed in the **URL fragment** (after `#`). This link is displayed to you once. Shield does not store it.
+  </Step>
+
+  <Step title="Decryption by recipient">
+    When the recipient opens the link, their browser reads the secret key directly from the URL fragment. After SIWE verification succeeds, the encrypted blob is fetched from IPFS and decrypted in the recipient's browser using the key. The key is never sent to any server during this process.
+  </Step>
+</Steps>
+
+## Why URL fragments are safe for keys
+
+The HTTP specification defines that browsers **must not** include the fragment identifier (the `#` portion of a URL) in HTTP requests. This is enforced at the browser level, not by Shield's code. Concretely:
+
+- When a recipient visits `https://shieldhq.xyz/r/abc#secretkey`, the HTTP request sent to the server is for `/r/abc` only.
+- The string `secretkey` never appears in any server log, request header, or network packet.
+- Intermediate infrastructure — load balancers, CDNs, proxies — also never see the fragment.
+
+JavaScript running on the page can access `window.location.hash`, which is how Shield reads the key for decryption. No network round-trip is required.
+
+## Policy IDs
+
+Each share has a unique policy ID generated using **`crypto.getRandomValues(new Uint8Array(32))`** — 32 cryptographically random bytes, represented as a `0x`-prefixed hex string. Before the policy creation transaction is submitted, the frontend checks that no policy already exists for this ID by reading the contract. If a collision is found (extremely unlikely), a new random ID is generated and checked again.
+
+Policy IDs are used to:
+
+- Look up the IPFS CID in the backend database
+- Reference the on-chain `AccessPolicy` struct in the Shield contract
+
+Policy IDs are not secret — they appear in the share URL path (`/r/<policyId>`). The confidentiality of the share depends entirely on the secret key in the URL fragment, not on the policy ID being hidden.
+
+## Security implications
+
+**The link is the key.** Anyone with the full share link — including the `#fragment` — can attempt to access the content, subject to the on-chain policy (correct recipient address, within expiry, within attempt limit). The on-chain policy provides the second layer of access control: even with the link, access is denied if the recipient's wallet does not match the policy.
+
+**Link privacy matters.** Because the secret key is in the link, you should:
+
+- Share the link only through end-to-end encrypted channels (not plain email or SMS).
+- Avoid copying the link into logs, analytics tools, or URL shorteners that may strip or log fragments.
+- Revoke the share from your profile page if you believe the link has been compromised.
+
+**No server-side recovery.** Shield's backend stores the policy ID and IPFS CID, but not the secret key. If you lose the link, there is no administrative action that can restore access to the content.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Trust Model" icon="shield" href="/security/trust-model">
+    What Shield can and cannot see, and how the hybrid architecture works.
+  </Card>
+  <Card title="Encryption feature overview" icon="lock" href="/features/encryption">
+    How AES-GCM encryption is applied to files and messages.
+  </Card>
+</CardGroup>

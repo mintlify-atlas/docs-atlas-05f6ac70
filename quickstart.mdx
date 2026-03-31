@@ -1,80 +1,125 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quick Start"
+description: "Get up and running with Shield in minutes — connect your wallet, create a secure link, and share encrypted content."
 ---
 
-## Get started in three steps
+Shield lets you share encrypted files and messages with any wallet address. The entire process takes under two minutes.
 
-Get your documentation site running locally and make your first customization.
+## Before you start
 
-### Step 1: Set up your local environment
+You need:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+- An Ethereum wallet (MetaMask, Coinbase Wallet, or any WalletConnect-compatible wallet)
+- ETH on the Base network to pay for transaction gas
+- The recipient's Ethereum wallet address
 
-### Step 2: Deploy your changes
+<Info>
+  Shield runs on Base mainnet. If your wallet is on a different network, the app will prompt you to switch before you can create a link.
+</Info>
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+## Create and share a secure link
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<Steps>
+  <Step title="Connect your wallet">
+    Open [shieldhq.xyz](https://shieldhq.xyz) and click **Connect Wallet**. Shield uses RainbowKit, so you can connect with MetaMask, Coinbase Wallet, WalletConnect, or any compatible wallet.
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    Once connected, Shield checks your tier and shows how many links you have created today.
+  </Step>
 
-### Step 3: Go live
+  <Step title="Choose your content type">
+    Select either **File** or **Text** from the toggle at the top of the form.
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    - **File** — upload any file up to 30MB (free tier) or 1GB (Pro)
+    - **Text** — paste or type a message up to 500 characters (free tier) or unlimited (Pro)
 
-## Next steps
+    Your content is encrypted immediately in your browser before anything is sent anywhere.
+  </Step>
 
-Now that you have your docs running, explore these key features:
+  <Step title="Set access conditions">
+    Fill in the three access fields:
 
-<CardGroup cols={2}>
+    | Field | Description |
+    |-------|-------------|
+    | **Recipient address** | The Ethereum address of the person who can decrypt the content. Only this address can access it. |
+    | **Time limit (seconds)** | How long the link stays valid. For example, `3600` is 1 hour, `86400` is 24 hours. |
+    | **Max attempts** | The maximum number of times the recipient can access the content. After this, the policy expires. |
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+    These conditions are enforced by the Shield smart contract on Base — not by Shield's servers.
+  </Step>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+  <Step title="Generate the link">
+    Click **Generate Link**. Shield will:
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
+    1. Encrypt your content in the browser using AES-GCM 256
+    2. Upload the encrypted blob to IPFS via Pinata
+    3. Prompt your wallet to sign a `createPolicy` transaction on Base
+    4. Wait for the transaction to confirm on-chain
+    5. Store a non-sensitive CID mapping in the Shield database
+    6. Return a secure link with the decryption key embedded in the URL fragment
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
+    The wallet prompt appears at step 3. You will pay a small gas fee to create the on-chain policy.
+  </Step>
 
-</CardGroup>
+  <Step title="Copy and share the link">
+    Once generated, your secure link appears in the form. Click **Copy** to copy it to your clipboard.
+
+    <Warning>
+      Copy the link now. The decryption key is not stored anywhere — not in Shield's database, not on IPFS, and not on-chain. If you close the page without copying, the key is gone and the content cannot be recovered.
+    </Warning>
+
+    Send the link to your recipient through any channel — email, a messaging app, or otherwise. The security guarantee does not depend on the channel; it comes from the encryption and the on-chain access policy.
+  </Step>
+
+  <Step title="Recipient accesses the content">
+    When your recipient opens the link, they land on a wallet verification page. They must:
+
+    1. Connect the wallet that matches the recipient address you specified
+    2. Sign a SIWE (Sign-In with Ethereum) message to prove wallet ownership
+    3. Confirm a `logAttempt` transaction on Base to create an on-chain access record
+    4. Wait for the transaction to confirm
+
+    After confirmation, Shield decrypts the content directly in their browser using the key from the URL fragment. Images and PDFs are displayed inline; other file types are offered as a download.
+  </Step>
+</Steps>
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  The secret decryption key lives only in the URL fragment (the `#key` part of the link). Browsers never include URL fragments in HTTP requests, so the key is never sent to Shield's servers, IPFS, or the Base blockchain. Only someone with the full link can decrypt the content.
 </Note>
+
+## Free tier limits
+
+| Limit | Free | Pro |
+|-------|------|-----|
+| Links per day | 5 | 50 |
+| Max file size | 30MB | 1GB |
+| Max text length | 500 characters | Unlimited |
+| API requests per minute | 3 | 10 |
+
+<Tip>
+  You can check your daily link count at the top of the create form once your wallet is connected. Counts reset each day.
+</Tip>
+
+## Good use cases for Shield
+
+Shield is designed for content that must remain confidential and that has a natural expiry:
+
+- **Legal documents** — share a contract with a counterparty and set it to expire after signing
+- **API keys and credentials** — send a secret to a colleague without using email or chat
+- **Medical or financial records** — share with a specific individual and limit access to one attempt
+- **Private media** — send images or videos that only the recipient can view
+- **Time-sensitive instructions** — create links that expire after a set number of seconds
+
+<CardGroup cols={2}>
+  <Card title="How it works" icon="diagram-project" href="/how-it-works">
+    Understand the full 7-step encrypted architecture
+  </Card>
+  <Card title="Access policies" icon="file-shield" href="/features/access-policies">
+    Learn how on-chain policies control who can access your content
+  </Card>
+  <Card title="Encryption" icon="lock" href="/features/encryption">
+    Details on the AES-GCM 256 client-side encryption model
+  </Card>
+  <Card title="Plans" icon="star" href="/plans/overview">
+    Compare free and Pro tier limits
+  </Card>
+</CardGroup>

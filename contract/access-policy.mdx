@@ -1,0 +1,99 @@
+---
+title: "AccessPolicy struct"
+description: "The on-chain data structure that represents a single access policy in the Shield smart contract."
+---
+
+Every piece of shared content is governed by one `AccessPolicy` stored in the Shield contract. The struct captures the full set of conditions that must be satisfied for access to be granted.
+
+## Struct definition
+
+```solidity
+struct AccessPolicy {
+    address sender;
+    address recipient;
+    uint64  expiry;
+    uint32  maxAttempts;
+    uint32  attempts;
+    bool    valid;
+}
+```
+
+## Fields
+
+<ResponseField name="sender" type="address" required>
+  The wallet address of the account that called `createPolicy`. Set automatically to `msg.sender` at creation time — the caller cannot forge this value. Used as a sentinel: if `sender == address(0)` the policy does not exist.
+</ResponseField>
+
+<ResponseField name="recipient" type="address" required>
+  The wallet address that is authorized to access the content. Only this address may call `logAttempt`. The backend also checks that the SIWE-signed address matches this field before calling `isPolicyValid`.
+</ResponseField>
+
+<ResponseField name="expiry" type="uint64" required>
+  A Unix timestamp (seconds since epoch). Access is denied at or after this time. Stored as `uint64` for gas efficiency; the parameter accepted by `createPolicy` is `uint256` and is down-cast on storage.
+</ResponseField>
+
+<ResponseField name="maxAttempts" type="uint32" required>
+  The maximum number of times the recipient may call `logAttempt`. Once `attempts` reaches this value the policy is automatically invalidated. Stored as `uint32`; the parameter accepted by `createPolicy` is `uint256` and is down-cast on storage.
+</ResponseField>
+
+<ResponseField name="attempts" type="uint32">
+  The running count of access attempts logged by the recipient. Starts at `0`. Incremented by one on every successful call to `logAttempt`.
+</ResponseField>
+
+<ResponseField name="valid" type="bool">
+  Whether the policy is currently considered valid by the contract. Set to `true` at creation. Automatically set to `false` when `attempts >= maxAttempts` after a `logAttempt` call. Can also be observed as `false` if the policy was created with `maxAttempts = 0` (no attempts ever allowed).
+</ResponseField>
+
+## The `policies` mapping
+
+Policies are stored in a public mapping keyed by a `bytes32` policy ID:
+
+```solidity
+mapping(bytes32 => AccessPolicy) public policies;
+```
+
+Because the mapping is `public`, the Solidity compiler generates a getter function. You can read any policy's full state with a standard contract read — no special permissions are needed.
+
+## Policy lifecycle
+
+A policy moves through states as follows:
+
+| State | Condition |
+|---|---|
+| **Active** | `valid == true`, `block.timestamp < expiry`, `attempts < maxAttempts` |
+| **Exhausted** | `attempts >= maxAttempts` (contract sets `valid = false`) |
+| **Expired** | `block.timestamp >= expiry` |
+| **Revoked** | `valid == false` (set server-side; the backend also tracks a `revoked` status in its database) |
+
+<Note>
+  The contract itself does not have a revoke function. Revocation is enforced at the backend layer — the Shield server checks its database before calling `isPolicyValid`. The `valid` flag on-chain is only set to `false` when the attempt limit is exhausted.
+</Note>
+
+## Events
+
+Both contract events reference the policy ID as an indexed parameter, making it straightforward to filter all events for a specific policy.
+
+### `PolicyCreated`
+
+```solidity
+event PolicyCreated(
+    bytes32 indexed policyId,
+    address indexed sender,
+    address indexed recipient,
+    uint256 expiry,
+    uint256 maxAttempts
+);
+```
+
+### `VerificationAttempt`
+
+```solidity
+event VerificationAttempt(
+    bytes32 indexed policyId,
+    bool success
+);
+```
+
+<Tip>
+  You can use the `PolicyCreated` event to reconstruct the full history of policies created by a given sender address, or received by a given recipient address, without reading contract storage directly.
+</Tip>

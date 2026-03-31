@@ -1,0 +1,142 @@
+---
+title: "Self-Hosting Setup"
+description: "Deploy your own instance of Shield — the decentralized, end-to-end encrypted file and message sharing platform."
+---
+
+## Prerequisites
+
+Before you begin, ensure you have the following:
+
+- **Node.js 18+** and npm installed
+- **PostgreSQL database** — local instance or a hosted provider such as [Neon](https://neon.tech)
+- **Pinata account** — for IPFS storage ([pinata.cloud](https://pinata.cloud))
+- **Alchemy account** — for blockchain RPC access ([alchemy.com](https://alchemy.com))
+- **Ethereum wallet** with Base Sepolia ETH (testnet) or Base ETH (mainnet) for contract deployment
+- **WalletConnect project** — for wallet connection support ([cloud.walletconnect.com](https://cloud.walletconnect.com))
+
+## Installation
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/Babs0022/SHIELD.git
+    cd SHIELD
+    ```
+  </Step>
+
+  <Step title="Install root dependencies">
+    ```bash
+    npm install
+    ```
+  </Step>
+
+  <Step title="Install frontend dependencies">
+    ```bash
+    cd frontend
+    npm install
+    cd ..
+    ```
+  </Step>
+
+  <Step title="Install contract dependencies">
+    ```bash
+    cd contracts
+    npm install
+    cd ..
+    ```
+  </Step>
+
+  <Step title="Configure environment variables">
+    Create a `.env` file in the `frontend/` directory with all required variables.
+
+    See [Environment Variables](/self-hosting/environment-variables) for the full reference and a copy-ready example file.
+
+    At minimum you need:
+
+    ```env
+    POSTGRES_URL=postgresql://user:password@host:port/database
+    PINATA_JWT=your_pinata_jwt
+    PINATA_GATEWAY_URL=https://your-gateway.mypinata.cloud
+    ALCHEMY_API_KEY=your_alchemy_key
+    NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID=your_walletconnect_project_id
+    NEXT_PUBLIC_APP_URL=http://localhost:3000
+    JWT_SECRET=your_jwt_secret
+    BASE_MAINNET_RPC_URL=https://mainnet.base.org
+    NEXT_PUBLIC_CONTRACT_ADDRESS=0x...
+    ```
+  </Step>
+
+  <Step title="Initialize the database">
+    Shield initializes its database schema automatically. Tables are created on first use via `CREATE TABLE IF NOT EXISTS` statements in the relevant API route handlers:
+
+    - `rate_limits` and `access_logs` — created on startup via `src/lib/db-init.ts`
+    - `users` and `onboarding_surveys` — created on the first sign-in via `src/app/api/signIn/route.ts`
+    - `policies` — you must create this table manually before first use
+
+    No separate migration step is required for the automatically-managed tables. Ensure your database user has `CREATE TABLE` permissions.
+
+    <Note>
+      Shield uses the [Neon serverless PostgreSQL driver](https://neon.tech/docs/serverless/serverless-driver). Any PostgreSQL-compatible database works, but Neon is recommended for serverless deployments.
+    </Note>
+  </Step>
+
+  <Step title="Deploy the smart contract">
+    Deploy `Shield.sol` to Base Sepolia (testnet) or Base Mainnet before starting the frontend.
+
+    See [Smart Contract Deployment](/self-hosting/smart-contract-deployment) for full instructions.
+
+    After deployment, add the deployed contract address to your `.env`:
+
+    ```env
+    NEXT_PUBLIC_SHIELD_CONTRACT_BASE_SEPOLIA=0x...   # testnet
+    NEXT_PUBLIC_SHIELD_CONTRACT_BASE=0x...           # mainnet
+    NEXT_PUBLIC_CONTRACT_ADDRESS=0x...               # active network
+    ```
+  </Step>
+
+  <Step title="Start the frontend development server">
+    ```bash
+    cd frontend
+    npm run dev
+    ```
+
+    Open [http://localhost:3000](http://localhost:3000) in your browser.
+  </Step>
+</Steps>
+
+## Project Structure
+
+```
+SHIELD/
+├── frontend/                 # Next.js 16 frontend application
+│   ├── src/
+│   │   ├── app/             # Next.js App Router
+│   │   │   ├── api/         # API routes
+│   │   │   ├── access/      # Content access page
+│   │   │   ├── admin/       # Admin dashboard
+│   │   │   ├── profile/     # User profile
+│   │   │   └── upgrade/     # Plan upgrade flow
+│   │   ├── components/      # React components
+│   │   ├── contexts/        # React contexts
+│   │   ├── hooks/           # Custom React hooks
+│   │   └── lib/             # Utility functions and DB client
+│   └── public/              # Static assets
+│
+└── contracts/               # Hardhat smart contract project
+    ├── contracts/
+    │   └── Shield.sol       # Access control contract
+    ├── scripts/
+    │   └── deploy.ts        # Deployment script
+    └── test/                # Contract tests
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Environment Variables" icon="gear" href="/self-hosting/environment-variables">
+    Full reference for every required and optional variable
+  </Card>
+  <Card title="Smart Contract Deployment" icon="file-contract" href="/self-hosting/smart-contract-deployment">
+    Deploy Shield.sol to Base Sepolia or Base Mainnet
+  </Card>
+</CardGroup>

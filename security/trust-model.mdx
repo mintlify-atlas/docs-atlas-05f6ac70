@@ -1,0 +1,84 @@
+---
+title: 'Trust Model'
+description: "Shield's trustless, end-to-end encrypted security model — what the platform can and cannot see, and why."
+---
+
+Shield is designed so that no single party — not the backend operator, not the IPFS node, not the blockchain — can reconstruct your plaintext content. This page explains exactly what each layer of the system can and cannot access, and what assumptions the model relies on.
+
+## What Shield can and cannot see
+
+| | Shield backend | IPFS / Pinata | Base blockchain |
+|---|---|---|---|
+| Plaintext content | Never | Never | Never |
+| Decryption keys | Never | Never | Never |
+| Encrypted blobs | No (stored on IPFS) | Yes (by design) | No |
+| Policy metadata | Yes (recipient address, expiry, attempt count) | No | Yes (on-chain policy struct) |
+| Access logs | Yes (IP address, timestamp, success/failure) | No | Yes (attempt count) |
+| Sender / recipient wallet addresses | Yes | No | Yes |
+
+The Shield backend stores a mapping between a policy ID and its IPFS CID for performance reasons. This is non-sensitive: the CID only identifies an encrypted blob, and the blob cannot be decrypted without the secret key embedded in the share link.
+
+## The three pillars
+
+<CardGroup cols={3}>
+  <Card title="Client-side encryption" icon="lock">
+    Content is encrypted in your browser using AES-GCM 256 via the Web Crypto API before it leaves your device. The secret key is generated locally and is never transmitted to any server.
+  </Card>
+  <Card title="On-chain access control" icon="link-2">
+    Access rules — recipient address, expiry time, maximum attempts — are stored in the Shield smart contract on Base. Enforcement is decentralized and transparent. Neither the backend operator nor any third party can bypass or modify these rules.
+  </Card>
+  <Card title="Decentralized storage" icon="database">
+    Encrypted content is stored on IPFS via Pinata. Because content is content-addressed (by CID), the backend cannot substitute or tamper with the encrypted blob after upload.
+  </Card>
+</CardGroup>
+
+## The URL fragment: why the key never reaches servers
+
+The secret encryption key is embedded in the **URL fragment** — the portion of the URL after the `#` character:
+
+```
+https://shieldhq.xyz/r/0xabc123...#<secret-key>
+```
+
+The URL fragment is a client-side-only construct. By definition in the HTTP specification, browsers do not include the fragment when making HTTP requests. This means:
+
+- The Shield backend **never receives** the secret key, even when the recipient visits the access page.
+- IPFS nodes and any CDN or proxy layer also never see the key.
+- Only users who have the full link — including the fragment — can decrypt the content.
+
+This is what makes the architecture genuinely end-to-end encrypted: the key travels exclusively inside the link itself, from sender to recipient, outside of any HTTP channel.
+
+## Hybrid architecture: the UX trade-off
+
+Shield uses a partially centralized design:
+
+- **Centralized**: The backend stores a `policy_id → IPFS CID` mapping in PostgreSQL. This enables fast link resolution without requiring the recipient to query the blockchain for a CID on every page load.
+- **Decentralized**: Access enforcement (who can access, when, how many times) is handled entirely by the Shield smart contract on Base. The backend cannot grant or deny access beyond what the contract permits.
+
+This is an intentional trade-off. The centralized CID mapping improves user experience without compromising confidentiality, because the CID alone is useless without the secret key. The security-critical logic — access authorization — remains on-chain and is not controllable by the backend operator.
+
+<Info>
+  If the Shield backend goes offline, existing links cannot be resolved (the CID lookup fails). However, the encrypted content on IPFS and the access policies on-chain remain intact. A self-hosted instance pointing to the same contract and IPFS pins can restore full functionality.
+</Info>
+
+## Verification flow
+
+When a recipient opens a link, Shield performs a layered verification before any decryption occurs:
+
+1. The recipient signs a SIWE (Sign-In with Ethereum) message, proving wallet ownership.
+2. The backend verifies the SIWE signature and checks that the signer's address matches the `recipient_address` stored in the policy.
+3. The backend calls `isPolicyValid()` on the Shield contract to confirm the policy has not expired and has remaining attempts.
+4. Only after all checks pass does the frontend retrieve the encrypted blob from IPFS and decrypt it using the key from the URL fragment.
+
+Every access attempt — successful or failed — is logged with the recipient address, IP address, and timestamp. Successful accesses also trigger an on-chain `logAttempt` transaction, creating an immutable record.
+
+## Related pages
+
+<CardGroup cols={2}>
+  <Card title="Key Management" icon="key" href="/security/key-management">
+    How encryption keys are generated, used, and why they cannot be recovered.
+  </Card>
+  <Card title="Rate Limiting" icon="clock" href="/security/rate-limiting">
+    How the backend protects against abuse.
+  </Card>
+</CardGroup>

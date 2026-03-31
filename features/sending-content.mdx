@@ -1,0 +1,126 @@
+---
+title: "Sending Content"
+description: "Share encrypted files and messages with anyone who has an Ethereum wallet"
+---
+
+Shield lets you encrypt a file or message directly in your browser and generate a one-time secure link. Only the wallet address you specify can ever open it — no accounts, no passwords, and no server ever sees your content unencrypted.
+
+## Before you start
+
+- Your wallet must be connected and on the **Base** network
+- You need a small amount of ETH on Base to cover the gas cost of creating an on-chain access policy
+- You need the recipient's Ethereum wallet address
+
+## Sending flow
+
+<Steps>
+  <Step title="Choose a content type">
+    Select **File** or **Text** from the toggle at the top of the form. Each mode has its own size limits depending on your plan.
+  </Step>
+  <Step title="Add your content">
+    Upload a file or paste your confidential message. Content is never sent to any server in plaintext — encryption happens entirely in your browser before anything leaves your device.
+  </Step>
+  <Step title="Set the recipient and access conditions">
+    Enter the recipient's Ethereum wallet address and configure the expiry and attempt limits that govern access. See [form fields](#form-fields) below for details on each option.
+  </Step>
+  <Step title="Confirm the on-chain transaction">
+    Click **Generate Link**. Your wallet will prompt you to sign a transaction that writes the access policy to the Shield smart contract on Base. This transaction stores who can access the content, when the access expires, and how many times it can be opened.
+  </Step>
+  <Step title="Copy and share the secure link">
+    Once the transaction is confirmed, your secure link is displayed. Copy it immediately and send it to your recipient through any channel — email, messaging app, or otherwise.
+
+    <Warning>
+      The decryption key is embedded in the URL fragment (`#key`) and is **never stored** anywhere — not on Shield's servers, not on IPFS, and not on the blockchain. This link is shown **exactly once**. If you close or reload the page without copying it, it cannot be recovered.
+    </Warning>
+  </Step>
+</Steps>
+
+## Content types
+
+<Tabs>
+  <Tab title="File">
+    Upload any file — documents, images, PDFs, archives, or any binary. The file is read into memory in your browser, encrypted with AES-GCM 256, and uploaded to IPFS as opaque binary data. The server never sees the original bytes.
+
+    **Size limits by plan:**
+
+    | Plan | Max file size |
+    |------|--------------|
+    | Free | 30 MB |
+    | Pro  | 1 GB |
+
+    If a selected file exceeds your plan's limit, the upload is blocked before any data leaves your device.
+  </Tab>
+  <Tab title="Text / Message">
+    Type or paste a confidential message. Text is encoded to UTF-8, encrypted identically to files, and stored on IPFS. The recipient sees the decrypted plaintext after verifying their wallet.
+
+    **Character limits by plan:**
+
+    | Plan | Max characters |
+    |------|---------------|
+    | Free | 500 characters |
+    | Pro  | Unlimited |
+
+    A live character counter is shown while you type on the free tier.
+  </Tab>
+</Tabs>
+
+## Form fields
+
+<CardGroup cols={2}>
+  <Card title="Recipient Address" icon="wallet">
+    The Ethereum wallet address of the person you are sharing with. Only this address can pass on-chain verification and decrypt the content. Shield validates the format client-side before submission.
+  </Card>
+  <Card title="Time Limit (seconds)" icon="clock">
+    How long the link remains valid, expressed in seconds from the moment the policy is created. For example, `3600` = 1 hour, `86400` = 24 hours. After this window elapses, the on-chain `isPolicyValid` check will return `false` and access is permanently denied.
+  </Card>
+  <Card title="Max Attempts" icon="shield-check">
+    The maximum number of times the recipient can successfully open the link. The default is `3`. Each successful access calls `logAttempt` on the smart contract and increments an on-chain counter. When the counter reaches the limit the policy is automatically invalidated.
+  </Card>
+  <Card title="Content Type Toggle" icon="toggle-on">
+    Switches the form between **File** upload and **Text** input mode. The selected mode is reflected in the MIME type stored with the policy metadata, so the receiver page knows how to render the decrypted content.
+  </Card>
+</CardGroup>
+
+## Daily link limits
+
+Shield enforces per-wallet daily creation limits that reset each day.
+
+| Plan | Links per day | Rate limit (per minute) |
+|------|--------------|------------------------|
+| Free | 5 links/day  | 3 requests/min |
+| Pro  | 50 links/day | 10 requests/min |
+
+The current count is shown at the top of the form. Limits are enforced both client-side and server-side — the `/api/storeMetadata` endpoint rejects requests that exceed the daily or per-minute limits.
+
+See [Plans overview](/plans/overview) to compare tiers, or [Upgrading](/plans/upgrading) to move to Pro.
+
+## The secure link format
+
+The generated link follows this structure:
+
+```
+https://your-domain.com/r/<policyId>#<urlEncodedSecretKey>
+```
+
+- **`/r/<policyId>`** — the route that loads the receiver page; `policyId` is a random 32-byte hex value generated client-side and checked for uniqueness against the contract before use
+- **`#<urlEncodedSecretKey>`** — the AES-GCM 256 key exported as a JWK, URL-encoded, and placed in the URL fragment
+
+The fragment (`#...`) is a browser-only value. It is **never included in HTTP requests**, so it never reaches Shield's servers, Pinata, or any other service in the stack. Only a person with the full URL — including the fragment — can decrypt the content.
+
+```
+Example:
+https://shieldhq.xyz/r/0x4a3f...c91b#%7B%22kty%22%3A%22oct%22%2C%22k%22%3A%22...%22%7D
+```
+
+<Info>
+  The policy ID portion of the URL (`/r/0x4a3f...`) is safe to observe by anyone — it only identifies which on-chain policy to check, not the content or the key. Without the `#key` fragment, the ciphertext on IPFS cannot be decrypted.
+</Info>
+
+## What gets stored where
+
+| Data | Location | Encrypted? |
+|------|----------|-----------|
+| File / message content | IPFS (via Pinata) | Yes — AES-GCM 256 |
+| IPFS CID ↔ policy ID mapping | PostgreSQL (Neon) | No — non-sensitive |
+| Recipient address, expiry, max attempts | Base blockchain | No — policy metadata |
+| Decryption key | **Nowhere** — only in the link fragment | N/A |
